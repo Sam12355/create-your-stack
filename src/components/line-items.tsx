@@ -134,10 +134,12 @@ export function LineItems({
   };
 
   const drop = async (row: LineItem) => {
+    if (!confirm(`Remove line item "${row.description}"?`)) return;
     await deleteRow(table, row.id);
     await pushTotals(rows.filter((r) => r.id !== row.id));
     await refresh();
   };
+
 
   return (
     <div className="rounded-lg border border-border bg-background">
