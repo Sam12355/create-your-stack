@@ -1,3 +1,4 @@
+import vybeLogo from "@/assets/vybe-logo.png.asset.json";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { selectAll } from "@/lib/api";
