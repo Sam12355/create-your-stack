@@ -13,6 +13,8 @@ import {
   useOne,
 } from "@/lib/api";
 import { formatDate, formatMoney } from "@/lib/money";
+import { downloadDocumentPdf, type PdfLine } from "@/lib/pdf";
+
 import { PageHeader } from "@/components/app-shell";
 import { LineItems } from "@/components/line-items";
 import { ErrorNote, Loading, StatusBadge, humanize } from "@/components/ui-bits";
