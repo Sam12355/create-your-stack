@@ -1,14 +1,18 @@
-# Welcome to your Lovable project
+# Your Next App
+
+make this system.  You can use nextjs and nodejs and postgresql but i will connect supabase dont use any lovable cloud things and if u need a gitrepo i will send you that also.
 
 This project was built with [Lovable](https://lovable.dev).
 
+**Live app**: https://create-your-stack.lovable.app
+
 ## Build with Lovable
 
-Open your project in the [Lovable editor](https://lovable.dev) and keep building.
+Continue developing this project in the [Lovable editor](https://lovable.dev/projects/069bb9cb-4b06-489b-a115-2eec78e41f5f).
 
 - **Ship faster**: describe what you want to build and Lovable handles the code.
-- **Stay in sync**: connect the project to GitHub and every change made in Lovable is committed straight to your repository.
-- **Full ownership**: this code is yours. Push to your repository and your changes sync back into Lovable, ready for your next prompt.
+- **Stay in sync**: every change made in Lovable is committed straight to this repository.
+- **Full ownership**: this code is yours. Push to `main` on GitHub and your changes sync back into Lovable, ready for your next prompt.
 
 ## Development
 
@@ -20,10 +24,3 @@ cd <repository-name>
 npm i
 npm run dev
 ```
-
-## Built with
-
-- TanStack Start
-- TypeScript
-- React
-- Tailwind CSS
