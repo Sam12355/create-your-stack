@@ -39,6 +39,7 @@ export type PdfDoc = {
   discount_total?: number;
   tax_total: number;
   grand_total: number;
+  additional_total?: number;
   paid_total?: number;
   balance?: number;
   notes?: string | null;
@@ -304,6 +305,7 @@ export async function downloadDocumentPdf(doc: PdfDoc): Promise<void> {
   const totals: Array<[string, string]> = [["Subtotal", formatMoney(doc.subtotal)]];
   if (doc.discount_total) totals.push(["Discount", `- ${formatMoney(doc.discount_total)}`]);
   if (doc.tax_total) totals.push(["Tax", formatMoney(doc.tax_total)]);
+  if (doc.additional_total) totals.push(["Additional costs", formatMoney(doc.additional_total)]);
   totals.push(["Total", formatMoney(doc.grand_total)]);
   if (doc.advance) {
     totals.push([`Advance (${doc.advance.percent}%)`, formatMoney(doc.advance.amount)]);
