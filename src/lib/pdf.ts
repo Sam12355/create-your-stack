@@ -393,5 +393,5 @@ export async function downloadDocumentPdf(doc: PdfDoc): Promise<void> {
     );
   }
 
-  pdf.save(`${doc.kind}-${doc.number}.pdf`);
+  pdf.save(`${(doc.heading ?? doc.kind).replace(/\s+/g, "-")}-${doc.number}.pdf`);
 }
