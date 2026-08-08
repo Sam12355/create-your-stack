@@ -14,6 +14,7 @@ import {
 } from "@/lib/api";
 import { formatDate, formatMoney, splitAdvance } from "@/lib/money";
 import { downloadDocumentPdf, type PdfLine } from "@/lib/pdf";
+import { applyTemplateToProject } from "@/lib/workflow";
 
 import { PageHeader } from "@/components/app-shell";
 import { LineItems } from "@/components/line-items";
