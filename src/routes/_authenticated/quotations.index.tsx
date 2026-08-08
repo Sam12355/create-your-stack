@@ -4,6 +4,13 @@ import { Plus } from "lucide-react";
 import { toast } from "sonner";
 import { insertRow, nextNumber, useList } from "@/lib/api";
 import { formatDate, formatMoney } from "@/lib/money";
+import {
+  createQuotationFromPackage,
+  introDiscountUsed,
+  packageOptions,
+  type PackageRow,
+} from "@/lib/quote";
+import { useSession } from "@/hooks/use-session";
 import { PageHeader } from "@/components/app-shell";
 import { RecordDialog, type Field } from "@/components/record-dialog";
 import { EmptyState, ErrorNote, Loading, StatusBadge } from "@/components/ui-bits";
