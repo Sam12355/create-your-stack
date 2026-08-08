@@ -1,10 +1,12 @@
 import { useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Printer, Trash2 } from "lucide-react";
+import { ArrowLeft, FileDown, Printer, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { deleteRow, insertRow, logActivity, updateRow, useList, useOne } from "@/lib/api";
+import { deleteRow, insertRow, logActivity, selectAll, updateRow, useList, useOne } from "@/lib/api";
 import { formatDate, formatMoney, splitAdvance } from "@/lib/money";
+import { downloadDocumentPdf, type PdfLine } from "@/lib/pdf";
+
 import { PageHeader } from "@/components/app-shell";
 import { LineItems } from "@/components/line-items";
 import { RecordDialog, type Field } from "@/components/record-dialog";
@@ -84,6 +86,40 @@ function InvoiceDetail() {
     qc.invalidateQueries({ queryKey: ["invoices"] });
   };
 
+  const exportPdf = async () => {
+    try {
+      const items = await selectAll<PdfLine>("invoice_items", { eq: { invoice_id: inv.id } });
+      const parties = inv.customer_id
+        ? await selectAll<{
+            name: string;
+            company: string | null;
+            address: string | null;
+            phone: string | null;
+            email: string | null;
+          }>("customers", { eq: { id: inv.customer_id } })
+        : [];
+      await downloadDocumentPdf({
+        kind: "Invoice",
+        number: inv.number,
+        issue_date: inv.issue_date,
+        secondary_label: "Due",
+        secondary_date: inv.due_date,
+        customer: parties[0],
+        items,
+        subtotal: inv.subtotal,
+        tax_total: inv.tax_total,
+        grand_total: inv.grand_total,
+        paid_total: inv.paid_total,
+        balance: inv.balance,
+        notes: inv.notes,
+      });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not generate PDF");
+    }
+  };
+
+
+
   const paymentFields: Field[] = [
     { name: "amount", label: "Amount (LKR)", type: "money", required: true },
     {
@@ -126,9 +162,13 @@ function InvoiceDetail() {
                 ))}
               </SelectContent>
             </Select>
+            <Button variant="outline" onClick={() => void exportPdf()}>
+              <FileDown className="mr-1.5 h-4 w-4" /> PDF
+            </Button>
             <Button variant="outline" onClick={() => window.print()}>
               <Printer className="mr-1.5 h-4 w-4" /> Print
             </Button>
+
             <Button onClick={() => setPayOpen(true)}>Record payment</Button>
           </>
         }
