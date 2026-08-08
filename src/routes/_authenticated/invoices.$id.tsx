@@ -39,13 +39,18 @@ type Invoice = {
   issue_date: string;
   due_date: string | null;
   subtotal: number;
+  discount_total: number;
   tax_total: number;
   grand_total: number;
+  additional_total: number;
+  advance_expected: number;
   paid_total: number;
   balance: number;
   notes: string | null;
   locked: boolean;
   milestone_label: string | null;
+  quotation_id: string | null;
+  quotation_snapshot: { number?: string; package_snapshot?: { name?: string } } | null;
 };
 type Payment = {
   id: string;
@@ -54,9 +59,18 @@ type Payment = {
   paid_on: string;
   reference: string | null;
 };
+type AdditionalCost = {
+  id: string;
+  label: string;
+  cost_type: string;
+  amount: number;
+  approval_status: string;
+  notes: string | null;
+};
 
 const STATUSES = ["draft", "sent", "partially_paid", "paid", "overdue", "void"];
 const METHODS = ["cash", "bank_transfer", "card", "cheque", "online", "other"];
+const COST_TYPES = ["overtime", "extra_hours", "travel", "equipment", "revision", "other"];
 
 function InvoiceDetail() {
   const { id } = Route.useParams();
