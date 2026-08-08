@@ -45,6 +45,14 @@ type Quotation = {
   customer_id: string | null;
 };
 
+type Customer = {
+  id: string;
+  name: string;
+  customer_no: string | null;
+  package_id: string | null;
+};
+
+
 function QuotationsPage() {
   const navigate = useNavigate();
   const { user, isOwner } = useSession();
