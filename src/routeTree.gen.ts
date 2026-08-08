@@ -20,6 +20,7 @@ import { Route as AuthenticatedLeadsRouteImport } from './routes/_authenticated/
 import { Route as AuthenticatedNotificationsRouteImport } from './routes/_authenticated/notifications'
 import { Route as AuthenticatedPackagesRouteImport } from './routes/_authenticated/packages'
 import { Route as AuthenticatedReportsRouteImport } from './routes/_authenticated/reports'
+import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
 import { Route as AuthenticatedTeamRouteImport } from './routes/_authenticated/team'
 import { Route as AuthenticatedWorkflowsRouteImport } from './routes/_authenticated/workflows'
 import { Route as AuthenticatedCustomersIdRouteImport } from './routes/_authenticated/customers.$id'
@@ -84,6 +85,11 @@ const AuthenticatedPackagesRoute = AuthenticatedPackagesRouteImport.update({
 const AuthenticatedReportsRoute = AuthenticatedReportsRouteImport.update({
   id: '/reports',
   path: '/reports',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedSettingsRoute = AuthenticatedSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const AuthenticatedTeamRoute = AuthenticatedTeamRouteImport.update({
@@ -153,6 +159,7 @@ export interface FileRoutesByFullPath {
   '/notifications': typeof AuthenticatedNotificationsRoute
   '/packages': typeof AuthenticatedPackagesRoute
   '/reports': typeof AuthenticatedReportsRoute
+  '/settings': typeof AuthenticatedSettingsRoute
   '/team': typeof AuthenticatedTeamRoute
   '/workflows': typeof AuthenticatedWorkflowsRoute
   '/customers/$id': typeof AuthenticatedCustomersIdRoute
@@ -175,6 +182,7 @@ export interface FileRoutesByTo {
   '/notifications': typeof AuthenticatedNotificationsRoute
   '/packages': typeof AuthenticatedPackagesRoute
   '/reports': typeof AuthenticatedReportsRoute
+  '/settings': typeof AuthenticatedSettingsRoute
   '/team': typeof AuthenticatedTeamRoute
   '/workflows': typeof AuthenticatedWorkflowsRoute
   '/customers/$id': typeof AuthenticatedCustomersIdRoute
@@ -199,6 +207,7 @@ export interface FileRoutesById {
   '/_authenticated/notifications': typeof AuthenticatedNotificationsRoute
   '/_authenticated/packages': typeof AuthenticatedPackagesRoute
   '/_authenticated/reports': typeof AuthenticatedReportsRoute
+  '/_authenticated/settings': typeof AuthenticatedSettingsRoute
   '/_authenticated/team': typeof AuthenticatedTeamRoute
   '/_authenticated/workflows': typeof AuthenticatedWorkflowsRoute
   '/_authenticated/customers/$id': typeof AuthenticatedCustomersIdRoute
@@ -223,6 +232,7 @@ export interface FileRouteTypes {
     | '/notifications'
     | '/packages'
     | '/reports'
+    | '/settings'
     | '/team'
     | '/workflows'
     | '/customers/$id'
@@ -245,6 +255,7 @@ export interface FileRouteTypes {
     | '/notifications'
     | '/packages'
     | '/reports'
+    | '/settings'
     | '/team'
     | '/workflows'
     | '/customers/$id'
@@ -268,6 +279,7 @@ export interface FileRouteTypes {
     | '/_authenticated/notifications'
     | '/_authenticated/packages'
     | '/_authenticated/reports'
+    | '/_authenticated/settings'
     | '/_authenticated/team'
     | '/_authenticated/workflows'
     | '/_authenticated/customers/$id'
@@ -366,6 +378,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedReportsRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/settings': {
+      id: '/_authenticated/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof AuthenticatedSettingsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/team': {
       id: '/_authenticated/team'
       path: '/team'
@@ -462,6 +481,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedNotificationsRoute: typeof AuthenticatedNotificationsRoute
   AuthenticatedPackagesRoute: typeof AuthenticatedPackagesRoute
   AuthenticatedReportsRoute: typeof AuthenticatedReportsRoute
+  AuthenticatedSettingsRoute: typeof AuthenticatedSettingsRoute
   AuthenticatedTeamRoute: typeof AuthenticatedTeamRoute
   AuthenticatedWorkflowsRoute: typeof AuthenticatedWorkflowsRoute
   AuthenticatedInvoicesIdRoute: typeof AuthenticatedInvoicesIdRoute
@@ -481,6 +501,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedNotificationsRoute: AuthenticatedNotificationsRoute,
   AuthenticatedPackagesRoute: AuthenticatedPackagesRoute,
   AuthenticatedReportsRoute: AuthenticatedReportsRoute,
+  AuthenticatedSettingsRoute: AuthenticatedSettingsRoute,
   AuthenticatedTeamRoute: AuthenticatedTeamRoute,
   AuthenticatedWorkflowsRoute: AuthenticatedWorkflowsRoute,
   AuthenticatedInvoicesIdRoute: AuthenticatedInvoicesIdRoute,
