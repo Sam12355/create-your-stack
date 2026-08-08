@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, FileDown, Printer } from "lucide-react";
+import { ArrowLeft, Copy, FileDown, FileText, Pencil, Printer, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import {
+  deleteRow,
   insertRow,
   logActivity,
   nextNumber,
@@ -12,13 +13,30 @@ import {
   useList,
   useOne,
 } from "@/lib/api";
-import { formatDate, formatMoney, splitAdvance } from "@/lib/money";
+import { formatDate, formatDateTime, formatMoney, splitAdvance } from "@/lib/money";
 import { downloadDocumentPdf, type PdfLine } from "@/lib/pdf";
 import { applyTemplateToProject } from "@/lib/workflow";
+import {
+  advanceState,
+  copyQuotation,
+  createFinalInvoiceFromQuotation,
+  customerSnapshot,
+  findFinalInvoice,
+  PAYMENT_METHODS,
+  QUOTATION_STATUSES,
+  quotationEditable,
+  recalcQuotation,
+  recordQuotationVersion,
+  scopeLines,
+  type PaymentRow,
+  type Quotation,
+} from "@/lib/documents";
+import { useSession } from "@/hooks/use-session";
 
 import { PageHeader } from "@/components/app-shell";
 import { LineItems } from "@/components/line-items";
-import { ErrorNote, Loading, StatusBadge, humanize } from "@/components/ui-bits";
+import { RecordDialog, type Field, type Values } from "@/components/record-dialog";
+import { EmptyState, ErrorNote, Loading, StatCard, StatusBadge, humanize } from "@/components/ui-bits";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -33,69 +51,52 @@ export const Route = createFileRoute("/_authenticated/quotations/$id")({
   head: () => ({
     meta: [
       { title: "Quotation — VYBE Business System" },
-      { name: "description", content: "Quotation detail with line items, totals and status." },
+      { name: "description", content: "Edit a quotation, record the advance and issue the final invoice." },
     ],
   }),
   component: QuotationDetail,
 });
 
-type Snapshot = {
-  name?: string;
-  category?: string;
-  scope?: string | null;
-  inclusions?: string[];
-  deliverables?: string | null;
-  exclusions?: string | null;
-  workflow_template_id?: string | null;
-  duration_note?: string | null;
-  revisions?: number | null;
-};
-
-type Quotation = {
+type VersionRow = {
   id: string;
-  number: string;
-  title: string;
-  status: string;
-  issue_date: string;
-  valid_until: string | null;
-  customer_id: string | null;
-  package_id: string | null;
-  package_snapshot: Snapshot | null;
-  advance_percent: number;
-  advance_amount: number;
-  balance_amount: number;
-  subtotal: number;
-  discount_total: number;
-  tax_total: number;
-  grand_total: number;
-  notes: string | null;
-  locked: boolean;
+  version: number;
+  reason: string | null;
+  changed_at: string;
+  changed_by: string | null;
 };
-
-const STATUSES = ["draft", "sent", "accepted", "rejected", "expired"];
-
-/** Bullet list of everything promised, taken from the frozen package snapshot. */
-function snapshotScope(snap: Snapshot | null): string[] {
-  if (!snap) return [];
-  return [
-    ...(snap.inclusions ?? []),
-    ...(snap.scope ? [snap.scope] : []),
-    ...(snap.deliverables ? [`Deliverables: ${snap.deliverables}`] : []),
-    ...(snap.duration_note ? [`Duration: ${snap.duration_note}`] : []),
-    ...(snap.revisions != null ? [`Included revisions: ${snap.revisions}`] : []),
-    ...(snap.exclusions ? [`Excludes: ${snap.exclusions}`] : []),
-  ];
-}
 
 function QuotationDetail() {
   const { id } = Route.useParams();
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const { user, isOwner } = useSession();
   const { data, isLoading, error } = useOne<Quotation>("quotations", id);
-  const customers = useList<{ id: string; name: string }>("customers", {
+  const customers = useList<{
+    id: string;
+    name: string;
+    customer_no: string | null;
+    company: string | null;
+    address: string | null;
+    phone: string | null;
+    email: string | null;
+  }>("customers", { order: { column: "name", ascending: true } });
+  const packages = useList<{ id: string; name: string; category: string }>("packages", {
     order: { column: "name", ascending: true },
   });
+  const payments = useList<PaymentRow>("payments", {
+    eq: { quotation_id: id },
+    order: { column: "paid_on", ascending: false },
+  });
+  const versions = useList<VersionRow>("quotation_versions", {
+    eq: { quotation_id: id },
+    order: { column: "changed_at", ascending: false },
+  });
+  const profiles = useList<{ id: string; full_name: string }>("profiles");
+
   const [working, setWorking] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [payOpen, setPayOpen] = useState(false);
+  const [reviseOpen, setReviseOpen] = useState(false);
 
   if (isLoading) return <Loading />;
   if (error) return <ErrorNote error={error} />;
@@ -103,66 +104,206 @@ function QuotationDetail() {
 
   const q = data;
   const customer = (customers.data ?? []).find((c) => c.id === q.customer_id);
-
-  const scope = snapshotScope(q.package_snapshot);
+  const scope = scopeLines(q.inclusions, q.package_snapshot, q.package_description);
   const advancePercent = Number(q.advance_percent ?? 50);
   const advance = splitAdvance(q.grand_total, advancePercent);
+  const advanceReceived = (payments.data ?? []).reduce((s, p) => s + Number(p.amount), 0);
+  const advanceStatus = advanceState(advance.advance, advanceReceived);
+  const editable = quotationEditable(q.status);
+  const canEditFinancials = isOwner || (user != null && q.status === "draft");
+  const paymentPeople = new Map((profiles.data ?? []).map((p) => [p.id, p.full_name]));
+
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ["quotations"] });
+    qc.invalidateQueries({ queryKey: ["quotation_versions"] });
+    qc.invalidateQueries({ queryKey: ["payments"] });
+    qc.invalidateQueries({ queryKey: ["invoices"] });
+  };
 
   const setStatus = async (status: string) => {
-    // Issued documents freeze: once sent or accepted the line items are locked.
-    const lock = status === "sent" || status === "accepted";
     await updateRow("quotations", q.id, {
       status,
-      ...(lock ? { locked: true } : {}),
       ...(status === "sent" ? { sent_at: new Date().toISOString() } : {}),
-      ...(status === "accepted" ? { accepted_at: new Date().toISOString() } : {}),
+      ...(status === "accepted" ? { accepted_at: new Date().toISOString(), locked: true } : {}),
       advance_percent: advancePercent,
       advance_amount: advance.advance,
       balance_amount: advance.balance,
     });
     await logActivity("quotation", q.id, `status → ${status}`);
-    qc.invalidateQueries({ queryKey: ["quotations"] });
+    invalidate();
+    toast.success(`Marked as ${humanize(status)}.`);
   };
 
   const exportPdf = async () => {
     try {
       const items = await selectAll<PdfLine>("quotation_items", { eq: { quotation_id: q.id } });
-      const parties = q.customer_id
-        ? await selectAll<{
-            name: string;
-            company: string | null;
-            address: string | null;
-            phone: string | null;
-            email: string | null;
-          }>("customers", { eq: { id: q.customer_id } })
-        : [];
+      const party =
+        q.customer_snapshot ??
+        (customer
+          ? {
+              name: customer.name,
+              company: customer.company,
+              address: customer.address,
+              phone: customer.phone,
+              email: customer.email,
+            }
+          : undefined);
       await downloadDocumentPdf({
         kind: "Quotation",
+        heading: "QUOTATION",
         number: q.number,
         title: q.title,
         issue_date: q.issue_date,
         secondary_label: "Valid until",
         secondary_date: q.valid_until,
-        customer: parties[0],
+        customer: party ?? undefined,
         items,
         scope,
-        advance: {
-          percent: advancePercent,
-          amount: advance.advance,
-          balance: advance.balance,
-        },
+        advance: { percent: advancePercent, amount: advance.advance, balance: advance.balance },
         subtotal: q.subtotal,
         discount_total: q.discount_total,
         tax_total: q.tax_total,
         grand_total: q.grand_total,
         notes: q.notes,
+        bank_details: q.bank_details,
+        terms: q.terms_text,
+        payment_instructions: q.payment_instructions,
+        payment_status: humanize(advanceStatus),
       });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not generate PDF");
     }
   };
 
+  const editFields: Field[] = [
+    { name: "issue_date", label: "Quotation date", type: "date", required: true },
+    { name: "valid_until", label: "Validity date", type: "date" },
+    {
+      name: "customer_id",
+      label: "Customer",
+      type: "select",
+      required: true,
+      options: (customers.data ?? []).map((c) => ({
+        value: c.id,
+        label: c.customer_no ? `${c.customer_no} — ${c.name}` : c.name,
+      })),
+    },
+    { name: "customer_address", label: "Customer address", type: "textarea" },
+    {
+      name: "package_id",
+      label: "Selected package",
+      type: "select",
+      options: (packages.data ?? []).map((p) => ({ value: p.id, label: `${p.name} — ${p.category}` })),
+    },
+    { name: "title", label: "Quotation title", full: true },
+    { name: "package_description", label: "Package description", type: "textarea" },
+    {
+      name: "inclusions",
+      label: "Package inclusions (one per line)",
+      type: "list",
+      placeholder: "Full-day studio session\n2 edited reels\n1 round of revisions",
+    },
+    { name: "advance_percent", label: "Required advance %", type: "number", required: true },
+    { name: "notes", label: "Notes", type: "textarea" },
+    { name: "bank_details", label: "Bank details", type: "textarea" },
+    { name: "payment_instructions", label: "Payment instructions", type: "textarea" },
+    { name: "terms_text", label: "Terms & conditions", type: "textarea" },
+    {
+      name: "amendment_reason",
+      label: "Reason for editing",
+      full: true,
+      help: "Stored in the version history.",
+    },
+  ];
 
+  const saveEdit = async (values: Values) => {
+    setWorking(true);
+    try {
+      const nextCustomer = String(values["customer_id"] ?? q.customer_id ?? "");
+      const snapshot = nextCustomer ? await customerSnapshot(nextCustomer) : null;
+      const address = String(values["customer_address"] ?? "").trim();
+      const next = {
+        issue_date: values["issue_date"],
+        valid_until: values["valid_until"] || null,
+        customer_id: nextCustomer || null,
+        customer_snapshot: snapshot ? { ...snapshot, address: address || snapshot.address } : null,
+        package_id: values["package_id"] || null,
+        title: String(values["title"] ?? ""),
+        package_description: (values["package_description"] as string) || null,
+        inclusions: Array.isArray(values["inclusions"]) ? values["inclusions"] : [],
+        advance_percent: Number(values["advance_percent"] ?? 50),
+        notes: (values["notes"] as string) || null,
+        bank_details: (values["bank_details"] as string) || null,
+        payment_instructions: (values["payment_instructions"] as string) || null,
+        terms_text: (values["terms_text"] as string) || null,
+        amendment_reason: (values["amendment_reason"] as string) || null,
+      };
+      const version = await recordQuotationVersion(
+        q as unknown as Record<string, unknown> & { id: string },
+        next,
+        next.amendment_reason,
+      );
+      await updateRow("quotations", q.id, { ...next, version });
+      await recalcQuotation(q.id, next.advance_percent);
+      await logActivity("quotation", q.id, "edited", { version });
+      invalidate();
+      setEditOpen(false);
+      toast.success("Quotation updated.");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not save the quotation");
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  const openEdit = () => {
+    if (!canEditFinancials) {
+      toast.error("Only an owner can edit an issued quotation.");
+      return;
+    }
+    if (!editable) {
+      toast.error("This quotation is closed — create a revised version instead.");
+      setReviseOpen(true);
+      return;
+    }
+    if (q.status !== "draft") {
+      const ok = confirm(
+        "This quotation has already been sent to the customer. Update the existing quotation? Choose Cancel to create a revised version instead.",
+      );
+      if (!ok) {
+        setReviseOpen(true);
+        return;
+      }
+    }
+    setEditOpen(true);
+  };
+
+  const duplicate = async (revision: boolean, reason?: string | null) => {
+    setWorking(true);
+    try {
+      const created = await copyQuotation(q, { revision, ...(reason ? { reason } : {}) });
+      invalidate();
+      setReviseOpen(false);
+      toast.success(`${revision ? "Revision" : "Copy"} ${created.number} created.`);
+      navigate({ to: "/quotations/$id", params: { id: created.id } });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not copy the quotation");
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  const deleteDraft = async () => {
+    if (q.status !== "draft") {
+      toast.error("Only a draft quotation can be deleted.");
+      return;
+    }
+    if (!confirm(`Delete draft ${q.number}? This cannot be undone.`)) return;
+    await deleteRow("quotations", q.id);
+    invalidate();
+    toast.success("Draft deleted.");
+    navigate({ to: "/quotations" });
+  };
 
   const convertToProject = async () => {
     if (!q.customer_id) {
@@ -198,65 +339,45 @@ function QuotationDetail() {
     }
   };
 
-  const convertToInvoice = async () => {
-    if (!q.customer_id) {
-      toast.error("Attach a customer before invoicing.");
-      return;
-    }
-    if (q.status !== "accepted") {
-      toast.error("Only accepted quotations can become a final invoice.");
-      return;
-    }
+  const goToFinalInvoice = async () => {
     setWorking(true);
     try {
-      const number = await nextNumber("invoice");
-      const invoice = await insertRow<{ id: string }>("invoices", {
-        number,
-        customer_id: q.customer_id,
-        quotation_id: q.id,
-        quotation_snapshot: {
-          number: q.number,
-          title: q.title,
-          issue_date: q.issue_date,
-          grand_total: q.grand_total,
-          package_snapshot: q.package_snapshot,
-        },
-        doc_kind: "final",
-        status: "draft",
-        subtotal: q.subtotal,
-        discount_total: q.discount_total,
-        tax_total: q.tax_total,
-        grand_total: q.grand_total,
-        advance_expected: advance.advance,
-        balance: q.grand_total,
-      });
-      const items = await selectAll<Record<string, unknown>>("quotation_items", {
-        eq: { quotation_id: q.id },
-        order: { column: "position", ascending: true },
-      });
-      for (const it of items) {
-        await insertRow("invoice_items", {
-          invoice_id: invoice.id,
-          package_id: it["package_id"],
-          description: it["description"],
-          quantity: it["quantity"],
-          unit_price: it["unit_price"],
-          discount: it["discount"],
-          tax_rate: it["tax_rate"],
-          line_total: it["line_total"],
-          position: it["position"],
-        });
+      const existing = await findFinalInvoice(q.id);
+      if (existing) {
+        navigate({ to: "/invoices/$id", params: { id: existing.id } });
+        return;
       }
-      await logActivity("quotation", q.id, "converted to invoice", { invoice_id: invoice.id });
-      qc.invalidateQueries({ queryKey: ["invoices"] });
-      toast.success(`Invoice ${number} created.`);
-      navigate({ to: "/invoices/$id", params: { id: invoice.id } });
+      if (q.status !== "accepted") {
+        const ok = confirm(
+          "This quotation is not marked as Accepted. Create the final invoice anyway?",
+        );
+        if (!ok) return;
+      }
+      const created = await createFinalInvoiceFromQuotation(q);
+      invalidate();
+      toast.success(`Final invoice ${created.number} created from ${q.number}.`);
+      navigate({ to: "/invoices/$id", params: { id: created.id } });
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Conversion failed");
+      toast.error(e instanceof Error ? e.message : "Could not create the final invoice");
     } finally {
       setWorking(false);
     }
   };
+
+  const paymentFields: Field[] = [
+    { name: "paid_on", label: "Payment date", type: "date", required: true },
+    { name: "amount", label: "Amount paid (LKR)", type: "money", required: true },
+    {
+      name: "method",
+      label: "Payment method",
+      type: "select",
+      required: true,
+      options: PAYMENT_METHODS.map((m) => ({ value: m, label: humanize(m) })),
+    },
+    { name: "reference", label: "Bank / reference number" },
+    { name: "proof_url", label: "Payment proof link" },
+    { name: "notes", label: "Payment note", type: "textarea" },
+  ];
 
   return (
     <div>
@@ -268,90 +389,101 @@ function QuotationDetail() {
 
       <PageHeader
         title={`${q.number}${q.title ? ` — ${q.title}` : ""}`}
-        description={`${customer?.name ?? "No customer"} · issued ${formatDate(q.issue_date)}`}
+        description={`${customer?.name ?? "No customer"} · issued ${formatDate(q.issue_date)} · version ${q.version ?? 1}`}
         actions={
           <>
             <Select value={q.status} onValueChange={(v) => void setStatus(v)}>
-              <SelectTrigger className="w-40" aria-label="Status">
+              <SelectTrigger className="w-44" aria-label="Quotation status">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {STATUSES.map((s) => (
+                {QUOTATION_STATUSES.map((s) => (
                   <SelectItem key={s} value={s}>
                     {humanize(s)}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
+            <Button variant="outline" onClick={openEdit}>
+              <Pencil className="mr-1.5 h-4 w-4" /> Edit quotation
+            </Button>
             <Button variant="outline" onClick={() => void exportPdf()}>
-              <FileDown className="mr-1.5 h-4 w-4" /> PDF
+              <FileDown className="mr-1.5 h-4 w-4" /> Download PDF
             </Button>
             <Button variant="outline" onClick={() => window.print()}>
-              <Printer className="mr-1.5 h-4 w-4" /> Print
+              <Printer className="mr-1.5 h-4 w-4" /> Preview
             </Button>
-
+            <Button variant="outline" disabled={working} onClick={() => void duplicate(false)}>
+              <Copy className="mr-1.5 h-4 w-4" /> Duplicate
+            </Button>
+            <Button variant="outline" disabled={working} onClick={() => setReviseOpen(true)}>
+              Create revision
+            </Button>
+            <Button variant="outline" onClick={() => setPayOpen(true)}>
+              Record advance
+            </Button>
             <Button variant="outline" disabled={working} onClick={() => void convertToProject()}>
               To project
             </Button>
-            <Button disabled={working} onClick={() => void convertToInvoice()}>
-              To invoice
+            <Button disabled={working} onClick={() => void goToFinalInvoice()}>
+              <FileText className="mr-1.5 h-4 w-4" />
+              {q.invoice_id ? "View final invoice" : "Create final invoice"}
             </Button>
+            {q.status === "draft" ? (
+              <Button variant="ghost" className="text-destructive" onClick={() => void deleteDraft()}>
+                <Trash2 className="mr-1.5 h-4 w-4" /> Delete draft
+              </Button>
+            ) : null}
           </>
         }
       />
 
-      <div className="mb-4 grid gap-3 sm:grid-cols-4">
+      <div className="mb-4 grid gap-3 sm:grid-cols-5">
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-xs font-medium text-muted-foreground">Status</CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-1">
             <StatusBadge value={q.status} />
+            <div>
+              <StatusBadge value={advanceStatus} />
+            </div>
           </CardContent>
         </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-xs font-medium text-muted-foreground">Valid until</CardTitle>
-          </CardHeader>
-          <CardContent className="text-sm">{formatDate(q.valid_until)}</CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-xs font-medium text-muted-foreground">Tax</CardTitle>
-          </CardHeader>
-          <CardContent className="text-sm tabular">{formatMoney(q.tax_total)}</CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-xs font-medium text-muted-foreground">Grand total</CardTitle>
-          </CardHeader>
-          <CardContent className="text-lg font-semibold tabular">
-            {formatMoney(q.grand_total)}
-            <p className="text-xs font-normal text-muted-foreground">
-              {advancePercent}% advance {formatMoney(advance.advance)} · balance{" "}
-              {formatMoney(advance.balance)}
-            </p>
-          </CardContent>
-        </Card>
+        <StatCard label="Quotation total" value={formatMoney(q.grand_total)} tone="primary" />
+        <StatCard
+          label={`Required advance (${advancePercent}%)`}
+          value={formatMoney(advance.advance)}
+          tone="info"
+        />
+        <StatCard label="Advance received" value={formatMoney(advanceReceived)} tone="success" />
+        <StatCard
+          label="Remaining quoted balance"
+          value={formatMoney(Number(q.grand_total) - advanceReceived)}
+          hint={`Valid until ${formatDate(q.valid_until)}`}
+          tone="warning"
+        />
       </div>
 
       {scope.length > 0 ? (
         <Card className="mb-4">
-          <CardHeader className="pb-2">
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-base">
-              Scope & inclusions
+              Package details & inclusions
               {q.package_snapshot?.name ? ` — ${q.package_snapshot.name}` : ""}
             </CardTitle>
+            <Button size="sm" variant="outline" onClick={openEdit}>
+              Edit inclusions
+            </Button>
           </CardHeader>
           <CardContent>
             <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
-              {scope.map((s) => (
-                <li key={s}>{s}</li>
+              {scope.map((s, i) => (
+                <li key={`${s}-${i}`}>{s}</li>
               ))}
             </ul>
             <p className="mt-3 text-xs text-muted-foreground">
-              Frozen snapshot of the package at the time this quotation was created — later
-              catalogue price changes do not affect it.
+              Transaction snapshot — later catalogue price changes never alter this document.
             </p>
           </CardContent>
         </Card>
@@ -362,8 +494,87 @@ function QuotationDetail() {
         parentTable="quotations"
         parentKey="quotation_id"
         parentId={q.id}
-        locked={q.locked}
+        locked={!editable}
+        onChanged={() => recalcQuotation(q.id, advancePercent)}
       />
+
+      <Card className="mt-4">
+        <CardHeader className="flex flex-row items-center justify-between pb-3">
+          <CardTitle className="text-base">Advance payments</CardTitle>
+          <Button size="sm" variant="outline" onClick={() => setPayOpen(true)}>
+            Record advance
+          </Button>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {(payments.data ?? []).length === 0 ? (
+            <EmptyState
+              title="No advance recorded"
+              description={`Required advance is ${formatMoney(advance.advance)} (${advancePercent}% of the quotation total).`}
+            />
+          ) : (
+            (payments.data ?? []).map((p) => (
+              <div
+                key={p.id}
+                className="flex items-center justify-between rounded-md border border-border px-3 py-2 text-sm"
+              >
+                <span className="flex flex-wrap items-center gap-2">
+                  <span className="tabular font-medium">{formatMoney(p.amount)}</span>
+                  <StatusBadge value={p.method} />
+                  {p.reference ? (
+                    <span className="text-xs text-muted-foreground">{p.reference}</span>
+                  ) : null}
+                  {p.proof_url ? (
+                    <a
+                      href={p.proof_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-xs underline"
+                    >
+                      Proof
+                    </a>
+                  ) : null}
+                  {p.created_by ? (
+                    <span className="text-xs text-muted-foreground">
+                      by {paymentPeople.get(p.created_by) ?? "—"}
+                    </span>
+                  ) : null}
+                </span>
+                <span className="flex items-center gap-3">
+                  <span className="text-xs text-muted-foreground">{formatDate(p.paid_on)}</span>
+                  <button
+                    aria-label="Delete payment"
+                    className="text-muted-foreground hover:text-destructive"
+                    onClick={async () => {
+                      if (!confirm("Delete this payment record?")) return;
+                      await deleteRow("payments", p.id);
+                      invalidate();
+                    }}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </span>
+              </div>
+            ))
+          )}
+          <dl className="grid gap-1 border-t border-border pt-3 text-sm sm:grid-cols-2">
+            {[
+              ["Quotation total", formatMoney(q.grand_total)],
+              [`Required advance (${advancePercent}%)`, formatMoney(advance.advance)],
+              ["Advance received", formatMoney(advanceReceived)],
+              [
+                "Unpaid advance",
+                formatMoney(Math.max(0, advance.advance - advanceReceived)),
+              ],
+              ["Original remaining balance", formatMoney(advance.balance)],
+            ].map(([label, value]) => (
+              <div key={label} className="flex justify-between gap-4">
+                <dt className="text-muted-foreground">{label}</dt>
+                <dd className="tabular">{value}</dd>
+              </div>
+            ))}
+          </dl>
+        </CardContent>
+      </Card>
 
       {q.notes ? (
         <Card className="mt-4">
@@ -375,6 +586,107 @@ function QuotationDetail() {
           </CardContent>
         </Card>
       ) : null}
+
+      <Card className="mt-4">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base">Version history</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {(versions.data ?? []).length === 0 ? (
+            <EmptyState title="No edits yet" description="Every edit is recorded here." />
+          ) : (
+            (versions.data ?? []).map((v) => (
+              <div
+                key={v.id}
+                className="flex items-center justify-between rounded-md border border-border px-3 py-2 text-sm"
+              >
+                <span>
+                  <span className="font-medium">v{v.version}</span>{" "}
+                  <span className="text-muted-foreground">{v.reason ?? "Edited"}</span>
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {v.changed_by ? `${paymentPeople.get(v.changed_by) ?? "—"} · ` : ""}
+                  {formatDateTime(v.changed_at)}
+                </span>
+              </div>
+            ))
+          )}
+        </CardContent>
+      </Card>
+
+      <RecordDialog
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        title={`Edit ${q.number}`}
+        description="Totals, the advance split and the balance recalculate automatically when you save."
+        fields={editFields}
+        saving={working}
+        initial={{
+          issue_date: q.issue_date,
+          valid_until: q.valid_until,
+          customer_id: q.customer_id,
+          customer_address: q.customer_snapshot?.address ?? customer?.address ?? "",
+          package_id: q.package_id,
+          title: q.title,
+          package_description: q.package_description ?? q.package_snapshot?.scope ?? "",
+          inclusions: q.inclusions?.length ? q.inclusions : (q.package_snapshot?.inclusions ?? []),
+          advance_percent: advancePercent,
+          notes: q.notes,
+          bank_details: q.bank_details,
+          payment_instructions: q.payment_instructions,
+          terms_text: q.terms_text,
+          amendment_reason: "",
+        }}
+        onSubmit={saveEdit}
+      />
+
+      <RecordDialog
+        open={reviseOpen}
+        onOpenChange={setReviseOpen}
+        title="Create revised quotation"
+        description="The original stays untouched in the history and is marked Revised."
+        fields={[{ name: "reason", label: "Reason for the revision", full: true, required: true }]}
+        saving={working}
+        initial={{ reason: "" }}
+        onSubmit={(values) => duplicate(true, String(values["reason"] ?? ""))}
+      />
+
+      <RecordDialog
+        open={payOpen}
+        onOpenChange={setPayOpen}
+        title="Record advance payment"
+        description={`Required advance is ${formatMoney(advance.advance)} — ${advancePercent}% of ${formatMoney(q.grand_total)}.`}
+        fields={paymentFields}
+        initial={{
+          paid_on: new Date().toISOString().slice(0, 10),
+          amount: Math.max(0, advance.advance - advanceReceived),
+          method: "bank_transfer",
+        }}
+        onSubmit={async (values) => {
+          try {
+            await insertRow("payments", {
+              ...values,
+              quotation_id: q.id,
+              invoice_id: q.invoice_id ?? null,
+              customer_id: q.customer_id,
+              kind: "advance",
+              created_by: user?.id ?? null,
+            });
+            if (q.invoice_id) {
+              const { recalcInvoice } = await import("@/lib/documents");
+              await recalcInvoice(q.invoice_id);
+            }
+            await logActivity("quotation", q.id, "advance payment recorded", {
+              amount: values["amount"],
+            });
+            invalidate();
+            setPayOpen(false);
+            toast.success("Advance payment recorded.");
+          } catch (e) {
+            toast.error(e instanceof Error ? e.message : "Could not record the payment");
+          }
+        }}
+      />
     </div>
   );
 }
