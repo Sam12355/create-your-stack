@@ -19,6 +19,7 @@ import { Route as AuthenticatedLeadsRouteImport } from './routes/_authenticated/
 import { Route as AuthenticatedPackagesRouteImport } from './routes/_authenticated/packages'
 import { Route as AuthenticatedWorkflowsRouteImport } from './routes/_authenticated/workflows'
 import { Route as AuthenticatedQuotationsIndexRouteImport } from './routes/_authenticated/quotations.index'
+import { Route as AuthenticatedQuotationsIdRouteImport } from './routes/_authenticated/quotations.$id'
 import { Route as ApiPublicConfigDotjsRouteImport } from './routes/api/public/config[.]js'
 
 const IndexRoute = IndexRouteImport.update({
@@ -71,6 +72,12 @@ const AuthenticatedQuotationsIndexRoute =
     path: '/quotations/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedQuotationsIdRoute =
+  AuthenticatedQuotationsIdRouteImport.update({
+    id: '/quotations/$id',
+    path: '/quotations/$id',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const ApiPublicConfigDotjsRoute = ApiPublicConfigDotjsRouteImport.update({
   id: '/api/public/config.js',
   path: '/api/public/config.js',
@@ -86,6 +93,7 @@ export interface FileRoutesByFullPath {
   '/leads': typeof AuthenticatedLeadsRoute
   '/packages': typeof AuthenticatedPackagesRoute
   '/workflows': typeof AuthenticatedWorkflowsRoute
+  '/quotations/$id': typeof AuthenticatedQuotationsIdRoute
   '/api/public/config.js': typeof ApiPublicConfigDotjsRoute
   '/quotations/': typeof AuthenticatedQuotationsIndexRoute
 }
@@ -98,6 +106,7 @@ export interface FileRoutesByTo {
   '/leads': typeof AuthenticatedLeadsRoute
   '/packages': typeof AuthenticatedPackagesRoute
   '/workflows': typeof AuthenticatedWorkflowsRoute
+  '/quotations/$id': typeof AuthenticatedQuotationsIdRoute
   '/api/public/config.js': typeof ApiPublicConfigDotjsRoute
   '/quotations': typeof AuthenticatedQuotationsIndexRoute
 }
@@ -112,6 +121,7 @@ export interface FileRoutesById {
   '/_authenticated/leads': typeof AuthenticatedLeadsRoute
   '/_authenticated/packages': typeof AuthenticatedPackagesRoute
   '/_authenticated/workflows': typeof AuthenticatedWorkflowsRoute
+  '/_authenticated/quotations/$id': typeof AuthenticatedQuotationsIdRoute
   '/api/public/config.js': typeof ApiPublicConfigDotjsRoute
   '/_authenticated/quotations/': typeof AuthenticatedQuotationsIndexRoute
 }
@@ -126,6 +136,7 @@ export interface FileRouteTypes {
     | '/leads'
     | '/packages'
     | '/workflows'
+    | '/quotations/$id'
     | '/api/public/config.js'
     | '/quotations/'
   fileRoutesByTo: FileRoutesByTo
@@ -138,6 +149,7 @@ export interface FileRouteTypes {
     | '/leads'
     | '/packages'
     | '/workflows'
+    | '/quotations/$id'
     | '/api/public/config.js'
     | '/quotations'
   id:
@@ -151,6 +163,7 @@ export interface FileRouteTypes {
     | '/_authenticated/leads'
     | '/_authenticated/packages'
     | '/_authenticated/workflows'
+    | '/_authenticated/quotations/$id'
     | '/api/public/config.js'
     | '/_authenticated/quotations/'
   fileRoutesById: FileRoutesById
@@ -234,6 +247,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedQuotationsIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/quotations/$id': {
+      id: '/_authenticated/quotations/$id'
+      path: '/quotations/$id'
+      fullPath: '/quotations/$id'
+      preLoaderRoute: typeof AuthenticatedQuotationsIdRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/api/public/config.js': {
       id: '/api/public/config.js'
       path: '/api/public/config.js'
@@ -251,6 +271,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedLeadsRoute: typeof AuthenticatedLeadsRoute
   AuthenticatedPackagesRoute: typeof AuthenticatedPackagesRoute
   AuthenticatedWorkflowsRoute: typeof AuthenticatedWorkflowsRoute
+  AuthenticatedQuotationsIdRoute: typeof AuthenticatedQuotationsIdRoute
   AuthenticatedQuotationsIndexRoute: typeof AuthenticatedQuotationsIndexRoute
 }
 
@@ -261,6 +282,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedLeadsRoute: AuthenticatedLeadsRoute,
   AuthenticatedPackagesRoute: AuthenticatedPackagesRoute,
   AuthenticatedWorkflowsRoute: AuthenticatedWorkflowsRoute,
+  AuthenticatedQuotationsIdRoute: AuthenticatedQuotationsIdRoute,
   AuthenticatedQuotationsIndexRoute: AuthenticatedQuotationsIndexRoute,
 }
 
