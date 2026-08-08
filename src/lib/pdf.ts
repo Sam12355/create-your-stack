@@ -62,17 +62,42 @@ async function loadSettings(): Promise<Settings | null> {
   }
 }
 
+const LOGO_SIZE = 54;
+
+let logoDataUrl: string | null | undefined;
+
+async function loadLogo(): Promise<string | null> {
+  if (logoDataUrl !== undefined) return logoDataUrl;
+  try {
+    const res = await fetch(vybeLogo.url);
+    const blob = await res.blob();
+    logoDataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => reject(new Error("logo read failed"));
+      reader.readAsDataURL(blob);
+    });
+  } catch {
+    logoDataUrl = null;
+  }
+  return logoDataUrl;
+}
+
 /** Build a branded A4 PDF for a quotation, invoice or receipt and trigger a download. */
 export async function downloadDocumentPdf(doc: PdfDoc): Promise<void> {
-  const settings = await loadSettings();
+  const [settings, logo] = await Promise.all([loadSettings(), loadLogo()]);
   const pdf = new jsPDF({ unit: "pt", format: "a4" });
   const pageWidth = pdf.internal.pageSize.getWidth();
   let y = MARGIN;
 
   // Business header
+  const textX = logo ? MARGIN + LOGO_SIZE + 12 : MARGIN;
+  if (logo) {
+    pdf.addImage(logo, "PNG", MARGIN, y - 12, LOGO_SIZE, LOGO_SIZE);
+  }
   pdf.setFont("helvetica", "bold");
   pdf.setFontSize(18);
-  pdf.text(settings?.business_name ?? "VYBE Creative Media", MARGIN, y);
+  pdf.text(settings?.business_name ?? "VYBE Creative Media", textX, y);
 
   pdf.setFont("helvetica", "normal");
   pdf.setFontSize(9);
@@ -85,11 +110,12 @@ export async function downloadDocumentPdf(doc: PdfDoc): Promise<void> {
   ].filter(Boolean) as string[];
   let cy = y + 14;
   for (const line of contact) {
-    for (const wrapped of pdf.splitTextToSize(line, 260) as string[]) {
-      pdf.text(wrapped, MARGIN, cy);
+    for (const wrapped of pdf.splitTextToSize(line, 230) as string[]) {
+      pdf.text(wrapped, textX, cy);
       cy += 11;
     }
   }
+  cy = Math.max(cy, y + LOGO_SIZE - 6);
 
   // Document title block (right)
   pdf.setTextColor(20);

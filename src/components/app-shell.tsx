@@ -1,3 +1,4 @@
+import vybeLogo from "@/assets/vybe-logo.png.asset.json";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
@@ -59,9 +60,11 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className="flex min-h-screen bg-canvas">
       <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col bg-sidebar text-sidebar-foreground md:flex">
         <div className="flex items-center gap-2 px-5 py-5">
-          <div className="flex h-8 w-8 items-center justify-center rounded-md bg-sidebar-primary text-sm font-bold text-sidebar-primary-foreground">
-            V
-          </div>
+          <img
+            src={vybeLogo.url}
+            alt="VYBE Creative Media logo"
+            className="h-8 w-8 rounded-full bg-white object-contain"
+          />
           <div className="leading-tight">
             <p className="text-sm font-semibold text-sidebar-accent-foreground">VYBE</p>
             <p className="text-[11px] text-sidebar-foreground/70">Business System</p>

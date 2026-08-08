@@ -1,3 +1,4 @@
+import vybeLogo from "@/assets/vybe-logo.png.asset.json";
 import { useState } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
@@ -69,9 +70,11 @@ function AuthPage() {
     <div className="flex min-h-screen items-center justify-center bg-canvas px-4 py-10">
       <div className="w-full max-w-md">
         <div className="mb-6 flex items-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-primary text-lg font-bold text-primary-foreground">
-            V
-          </div>
+          <img
+            src={vybeLogo.url}
+            alt="VYBE Creative Media logo"
+            className="h-11 w-11 rounded-full bg-white object-contain"
+          />
           <div>
             <h1 className="text-lg font-semibold">VYBE Creative Media</h1>
             <p className="text-sm text-muted-foreground">Business Management System</p>
