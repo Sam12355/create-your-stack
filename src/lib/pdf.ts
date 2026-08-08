@@ -274,9 +274,31 @@ export async function downloadDocumentPdf(doc: PdfDoc): Promise<void> {
     },
   });
 
-  const afterTable =
+  let afterTable =
     (pdf as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? y;
+
+  // Additional costs (approved extras added during the project)
+  if (doc.additionalRows && doc.additionalRows.length > 0) {
+    autoTable(pdf, {
+      startY: afterTable + 16,
+      margin: { left: MARGIN, right: MARGIN },
+      head: [["Additional cost", "Qty", "Unit price", "Amount"]],
+      body: doc.additionalRows.map((r) => [...r]),
+      styles: { fontSize: 9, cellPadding: 6, textColor: 30, lineColor: 225, lineWidth: 0.5 },
+      headStyles: { fillColor: [244, 246, 250], textColor: 60, fontStyle: "bold" },
+      columnStyles: {
+        1: { halign: "right", cellWidth: 44 },
+        2: { halign: "right", cellWidth: 76 },
+        3: { halign: "right", cellWidth: 84 },
+      },
+    });
+    afterTable =
+      (pdf as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ??
+      afterTable;
+  }
+
   let ty = afterTable + 18;
+
 
   // Totals
   const totals: Array<[string, string]> = [["Subtotal", formatMoney(doc.subtotal)]];
