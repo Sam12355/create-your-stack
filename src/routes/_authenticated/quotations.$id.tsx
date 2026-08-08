@@ -82,6 +82,40 @@ function QuotationDetail() {
     qc.invalidateQueries({ queryKey: ["quotations"] });
   };
 
+  const exportPdf = async () => {
+    try {
+      const items = await selectAll<PdfLine>("quotation_items", { eq: { quotation_id: q.id } });
+      const parties = q.customer_id
+        ? await selectAll<{
+            name: string;
+            company: string | null;
+            address: string | null;
+            phone: string | null;
+            email: string | null;
+          }>("customers", { eq: { id: q.customer_id } })
+        : [];
+      await downloadDocumentPdf({
+        kind: "Quotation",
+        number: q.number,
+        title: q.title,
+        issue_date: q.issue_date,
+        secondary_label: "Valid until",
+        secondary_date: q.valid_until,
+        customer: parties[0],
+        items,
+        subtotal: q.subtotal,
+        discount_total: q.discount_total,
+        tax_total: q.tax_total,
+        grand_total: q.grand_total,
+        notes: q.notes,
+      });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not generate PDF");
+    }
+  };
+
+
+
   const convertToProject = async () => {
     if (!q.customer_id) {
       toast.error("Attach a customer before converting.");
