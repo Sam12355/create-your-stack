@@ -31,6 +31,7 @@ const NAV = [
   { to: "/packages", label: "Packages", icon: Package },
   { to: "/quotations", label: "Quotations", icon: FileText },
   { to: "/projects", label: "Projects", icon: FolderKanban },
+  { to: "/tracker", label: "Workflow Tracker", icon: ListChecks },
   { to: "/workflows", label: "Workflows", icon: Workflow },
   { to: "/calendar", label: "Calendar", icon: CalendarDays },
   { to: "/invoices", label: "Invoices", icon: Receipt },
