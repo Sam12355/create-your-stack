@@ -51,7 +51,7 @@ export const Route = createFileRoute("/_authenticated/invoices/$id")({
       },
     ],
   }),
-  component: InvoiceDetail;
+  component: InvoiceDetail,
 });
 
 function InvoiceDetail() {
