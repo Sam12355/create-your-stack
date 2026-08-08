@@ -1,3 +1,4 @@
+import vybeLogo from "@/assets/vybe-logo.png.asset.json";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";

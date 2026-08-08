@@ -1,3 +1,4 @@
+import vybeLogo from "@/assets/vybe-logo.png.asset.json";
 import { useState } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
