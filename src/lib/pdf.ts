@@ -24,11 +24,15 @@ export type PdfParty = {
 
 export type PdfDoc = {
   kind: "Quotation" | "Invoice" | "Receipt";
+  /** Big heading printed top-right, e.g. "FINAL INVOICE". Defaults to kind. */
+  heading?: string;
   number: string;
   title?: string | null;
   issue_date: string;
   secondary_label?: string;
   secondary_date?: string | null;
+  /** "Ref: VYBE-QUO-2026-0001 · 12 Mar 2026" style reference line. */
+  reference?: string | null;
   customer?: PdfParty | undefined;
   items: PdfLine[];
   subtotal: number;
@@ -39,15 +43,22 @@ export type PdfDoc = {
   balance?: number;
   notes?: string | null;
   extraRows?: Array<[string, string]>;
+  /** Additional-cost rows printed as a second table under the line items. */
+  additionalRows?: Array<[string, string, string, string]>;
   /** Scope / inclusions frozen on the document at issue time. */
   scope?: string[];
   /** Advance payment split printed under the totals. */
   advance?: { percent: number; amount: number; balance: number } | undefined;
   /** Extra terms printed above the settings terms (already snapshotted). */
   terms?: string | null;
+  /** Document-level overrides for the settings defaults. */
+  bank_details?: string | null;
+  payment_instructions?: string | null;
+  payment_status?: string | null;
   /** Print the signature line at the end of the document. */
   signature?: boolean;
 };
+
 
 type Settings = {
   business_name: string;
