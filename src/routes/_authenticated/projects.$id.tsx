@@ -14,6 +14,7 @@ import {
 import { formatDate, formatDateTime, formatMoney } from "@/lib/money";
 import { PageHeader } from "@/components/app-shell";
 import { RecordDialog, type Field } from "@/components/record-dialog";
+import { StageTracker } from "@/components/stage-tracker";
 import { EmptyState, ErrorNote, Loading, StatCard, StatusBadge, humanize } from "@/components/ui-bits";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
