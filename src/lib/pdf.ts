@@ -39,6 +39,14 @@ export type PdfDoc = {
   balance?: number;
   notes?: string | null;
   extraRows?: Array<[string, string]>;
+  /** Scope / inclusions frozen on the document at issue time. */
+  scope?: string[];
+  /** Advance payment split printed under the totals. */
+  advance?: { percent: number; amount: number; balance: number } | undefined;
+  /** Extra terms printed above the settings terms (already snapshotted). */
+  terms?: string | null;
+  /** Print the signature line at the end of the document. */
+  signature?: boolean;
 };
 
 type Settings = {
@@ -50,9 +58,23 @@ type Settings = {
   tax_number: string | null;
   bank_details: string | null;
   invoice_terms: string | null;
+  quotation_terms: string | null;
+  advance_term: string | null;
+  payment_instructions: string | null;
+  signature_label: string | null;
+  footer_text: string | null;
+  brand_primary: string | null;
 };
 
 const MARGIN = 40;
+
+/** #RRGGBB → [r,g,b] for jsPDF, falling back to the VYBE purple. */
+function rgb(hex?: string | null): [number, number, number] {
+  const m = /^#?([0-9a-f]{6})$/i.exec((hex ?? "").trim());
+  if (!m || !m[1]) return [109, 40, 217];
+  const n = parseInt(m[1], 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
 
 async function loadSettings(): Promise<Settings | null> {
   try {
@@ -62,6 +84,7 @@ async function loadSettings(): Promise<Settings | null> {
     return null;
   }
 }
+
 
 const LOGO_SIZE = 54;
 
@@ -119,10 +142,12 @@ export async function downloadDocumentPdf(doc: PdfDoc): Promise<void> {
   cy = Math.max(cy, y + LOGO_SIZE - 6);
 
   // Document title block (right)
-  pdf.setTextColor(20);
+  const brand = rgb(settings?.brand_primary);
+  pdf.setTextColor(brand[0], brand[1], brand[2]);
   pdf.setFont("helvetica", "bold");
   pdf.setFontSize(20);
   pdf.text(doc.kind.toUpperCase(), pageWidth - MARGIN, y, { align: "right" });
+  pdf.setTextColor(20);
   pdf.setFont("helvetica", "normal");
   pdf.setFontSize(10);
   pdf.text(doc.number, pageWidth - MARGIN, y + 16, { align: "right" });
@@ -139,8 +164,10 @@ export async function downloadDocumentPdf(doc: PdfDoc): Promise<void> {
   }
 
   y = Math.max(cy, y + 56) + 12;
-  pdf.setDrawColor(220);
+  pdf.setDrawColor(brand[0], brand[1], brand[2]);
+  pdf.setLineWidth(1.4);
   pdf.line(MARGIN, y, pageWidth - MARGIN, y);
+  pdf.setLineWidth(0.5);
   y += 20;
 
   // Bill to
@@ -176,6 +203,22 @@ export async function downloadDocumentPdf(doc: PdfDoc): Promise<void> {
   }
 
   y = by + 16;
+
+  // Scope / inclusions snapshot
+  if (doc.scope && doc.scope.length > 0) {
+    pdf.setTextColor(110);
+    pdf.setFontSize(9);
+    pdf.text("SCOPE & INCLUSIONS", MARGIN, y);
+    y += 13;
+    pdf.setTextColor(60);
+    for (const item of doc.scope) {
+      for (const wrapped of pdf.splitTextToSize(`•  ${item}`, pageWidth - MARGIN * 2) as string[]) {
+        pdf.text(wrapped, MARGIN, y);
+        y += 11;
+      }
+    }
+    y += 8;
+  }
 
   // Line items
   const items = [...doc.items].sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
@@ -213,6 +256,10 @@ export async function downloadDocumentPdf(doc: PdfDoc): Promise<void> {
   if (doc.discount_total) totals.push(["Discount", `- ${formatMoney(doc.discount_total)}`]);
   if (doc.tax_total) totals.push(["Tax", formatMoney(doc.tax_total)]);
   totals.push(["Total", formatMoney(doc.grand_total)]);
+  if (doc.advance) {
+    totals.push([`Advance (${doc.advance.percent}%)`, formatMoney(doc.advance.amount)]);
+    totals.push(["Balance on delivery", formatMoney(doc.advance.balance)]);
+  }
   if (doc.paid_total !== undefined) totals.push(["Paid", formatMoney(doc.paid_total)]);
   if (doc.balance !== undefined) totals.push(["Balance due", formatMoney(doc.balance)]);
   for (const row of doc.extraRows ?? []) totals.push(row);
@@ -253,8 +300,32 @@ export async function downloadDocumentPdf(doc: PdfDoc): Promise<void> {
   };
 
   block("Notes", doc.notes);
+  block("Payment terms", settings?.advance_term);
+  block("Payment instructions", settings?.payment_instructions);
   if (doc.kind !== "Quotation") block("Bank details", settings?.bank_details);
-  block("Terms & conditions", settings?.invoice_terms);
+  block(
+    "Terms & conditions",
+    doc.terms ?? (doc.kind === "Quotation" ? settings?.quotation_terms : settings?.invoice_terms),
+  );
+
+  if (doc.signature !== false) {
+    if (ny > pdf.internal.pageSize.getHeight() - 110) {
+      pdf.addPage();
+      ny = MARGIN;
+    }
+    ny += 24;
+    pdf.setDrawColor(180);
+    pdf.line(MARGIN, ny, MARGIN + 180, ny);
+    pdf.line(pageWidth - MARGIN - 180, ny, pageWidth - MARGIN, ny);
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(8);
+    pdf.setTextColor(110);
+    pdf.text(settings?.signature_label ?? "Authorised Signature", MARGIN, ny + 12);
+    pdf.text("Client acceptance (name, signature & date)", pageWidth - MARGIN, ny + 12, {
+      align: "right",
+    });
+  }
+
 
   const pages = pdf.getNumberOfPages();
   for (let p = 1; p <= pages; p += 1) {
@@ -263,7 +334,9 @@ export async function downloadDocumentPdf(doc: PdfDoc): Promise<void> {
     pdf.setFontSize(8);
     pdf.setTextColor(150);
     pdf.text(
-      `${settings?.business_name ?? "VYBE Creative Media"} · ${doc.number} · Page ${p} of ${pages}`,
+      [settings?.business_name ?? "VYBE Creative Media", settings?.footer_text, doc.number, `Page ${p} of ${pages}`]
+        .filter(Boolean)
+        .join(" · "),
       pageWidth / 2,
       pdf.internal.pageSize.getHeight() - 24,
       { align: "center" },

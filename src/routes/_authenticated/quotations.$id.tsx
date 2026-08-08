@@ -12,7 +12,7 @@ import {
   useList,
   useOne,
 } from "@/lib/api";
-import { formatDate, formatMoney } from "@/lib/money";
+import { formatDate, formatMoney, splitAdvance } from "@/lib/money";
 import { downloadDocumentPdf, type PdfLine } from "@/lib/pdf";
 
 import { PageHeader } from "@/components/app-shell";
@@ -38,6 +38,18 @@ export const Route = createFileRoute("/_authenticated/quotations/$id")({
   component: QuotationDetail,
 });
 
+type Snapshot = {
+  name?: string;
+  category?: string;
+  scope?: string | null;
+  inclusions?: string[];
+  deliverables?: string | null;
+  exclusions?: string | null;
+  workflow_template_id?: string | null;
+  duration_note?: string | null;
+  revisions?: number | null;
+};
+
 type Quotation = {
   id: string;
   number: string;
@@ -46,6 +58,11 @@ type Quotation = {
   issue_date: string;
   valid_until: string | null;
   customer_id: string | null;
+  package_id: string | null;
+  package_snapshot: Snapshot | null;
+  advance_percent: number;
+  advance_amount: number;
+  balance_amount: number;
   subtotal: number;
   discount_total: number;
   tax_total: number;
@@ -55,6 +72,19 @@ type Quotation = {
 };
 
 const STATUSES = ["draft", "sent", "accepted", "rejected", "expired"];
+
+/** Bullet list of everything promised, taken from the frozen package snapshot. */
+function snapshotScope(snap: Snapshot | null): string[] {
+  if (!snap) return [];
+  return [
+    ...(snap.inclusions ?? []),
+    ...(snap.scope ? [snap.scope] : []),
+    ...(snap.deliverables ? [`Deliverables: ${snap.deliverables}`] : []),
+    ...(snap.duration_note ? [`Duration: ${snap.duration_note}`] : []),
+    ...(snap.revisions != null ? [`Included revisions: ${snap.revisions}`] : []),
+    ...(snap.exclusions ? [`Excludes: ${snap.exclusions}`] : []),
+  ];
+}
 
 function QuotationDetail() {
   const { id } = Route.useParams();
@@ -73,10 +103,21 @@ function QuotationDetail() {
   const q = data;
   const customer = (customers.data ?? []).find((c) => c.id === q.customer_id);
 
+  const scope = snapshotScope(q.package_snapshot);
+  const advancePercent = Number(q.advance_percent ?? 50);
+  const advance = splitAdvance(q.grand_total, advancePercent);
+
   const setStatus = async (status: string) => {
+    // Issued documents freeze: once sent or accepted the line items are locked.
+    const lock = status === "sent" || status === "accepted";
     await updateRow("quotations", q.id, {
       status,
+      ...(lock ? { locked: true } : {}),
+      ...(status === "sent" ? { sent_at: new Date().toISOString() } : {}),
       ...(status === "accepted" ? { accepted_at: new Date().toISOString() } : {}),
+      advance_percent: advancePercent,
+      advance_amount: advance.advance,
+      balance_amount: advance.balance,
     });
     await logActivity("quotation", q.id, `status → ${status}`);
     qc.invalidateQueries({ queryKey: ["quotations"] });
@@ -103,6 +144,12 @@ function QuotationDetail() {
         secondary_date: q.valid_until,
         customer: parties[0],
         items,
+        scope,
+        advance: {
+          percent: advancePercent,
+          amount: advance.advance,
+          balance: advance.balance,
+        },
         subtotal: q.subtotal,
         discount_total: q.discount_total,
         tax_total: q.tax_total,
@@ -124,15 +171,21 @@ function QuotationDetail() {
     setWorking(true);
     try {
       const code = await nextNumber("project");
+      const templateId = q.package_snapshot?.workflow_template_id ?? null;
       const project = await insertRow<{ id: string }>("projects", {
         code,
         title: q.title || q.number,
         customer_id: q.customer_id,
         quotation_id: q.id,
+        package_id: q.package_id,
+        package_snapshot: q.package_snapshot,
+        workflow_template_id: templateId,
         agreed_total: q.grand_total,
         status: "planned",
         start_date: new Date().toISOString().slice(0, 10),
       });
+      if (templateId) await applyTemplateToProject(project.id, templateId);
+      await updateRow("quotations", q.id, { project_id: project.id });
       await logActivity("quotation", q.id, "converted to project", { project_id: project.id });
       qc.invalidateQueries({ queryKey: ["projects"] });
       toast.success(`Project ${code} created.`);
@@ -149,6 +202,10 @@ function QuotationDetail() {
       toast.error("Attach a customer before invoicing.");
       return;
     }
+    if (q.status !== "accepted") {
+      toast.error("Only accepted quotations can become a final invoice.");
+      return;
+    }
     setWorking(true);
     try {
       const number = await nextNumber("invoice");
@@ -156,11 +213,20 @@ function QuotationDetail() {
         number,
         customer_id: q.customer_id,
         quotation_id: q.id,
+        quotation_snapshot: {
+          number: q.number,
+          title: q.title,
+          issue_date: q.issue_date,
+          grand_total: q.grand_total,
+          package_snapshot: q.package_snapshot,
+        },
+        doc_kind: "final",
         status: "draft",
         subtotal: q.subtotal,
         discount_total: q.discount_total,
         tax_total: q.tax_total,
         grand_total: q.grand_total,
+        advance_expected: advance.advance,
         balance: q.grand_total,
       });
       const items = await selectAll<Record<string, unknown>>("quotation_items", {
