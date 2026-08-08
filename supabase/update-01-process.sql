@@ -7,9 +7,8 @@
 create extension if not exists "pgcrypto";
 
 -- ------------------------------------------------------------- enums
-do $$ begin
-  alter type public.quotation_status add value if not exists 'awaiting_response';
-exception when others then null; end $$;
+-- Run outside a DO block: ALTER TYPE ... ADD VALUE is not allowed inside one.
+alter type public.quotation_status add value if not exists 'awaiting_response';
 
 do $$ begin create type public.stage_status as enum
   ('not_started','in_progress','waiting_client','scheduled','completed','skipped','on_hold');
