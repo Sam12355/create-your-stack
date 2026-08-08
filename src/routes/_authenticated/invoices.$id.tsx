@@ -26,7 +26,7 @@ export const Route = createFileRoute("/_authenticated/invoices/$id")({
       { name: "description", content: "Invoice detail with line items, payments and balance." },
     ],
   }),
-  component: InvoiceDetail;
+  component: InvoiceDetail,
 });
 
 type Invoice = {
