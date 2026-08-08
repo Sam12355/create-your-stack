@@ -327,9 +327,35 @@ function QuotationDetail() {
           </CardHeader>
           <CardContent className="text-lg font-semibold tabular">
             {formatMoney(q.grand_total)}
+            <p className="text-xs font-normal text-muted-foreground">
+              {advancePercent}% advance {formatMoney(advance.advance)} · balance{" "}
+              {formatMoney(advance.balance)}
+            </p>
           </CardContent>
         </Card>
       </div>
+
+      {scope.length > 0 ? (
+        <Card className="mb-4">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">
+              Scope & inclusions
+              {q.package_snapshot?.name ? ` — ${q.package_snapshot.name}` : ""}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
+              {scope.map((s) => (
+                <li key={s}>{s}</li>
+              ))}
+            </ul>
+            <p className="mt-3 text-xs text-muted-foreground">
+              Frozen snapshot of the package at the time this quotation was created — later
+              catalogue price changes do not affect it.
+            </p>
+          </CardContent>
+        </Card>
+      ) : null}
 
       <LineItems
         table="quotation_items"
