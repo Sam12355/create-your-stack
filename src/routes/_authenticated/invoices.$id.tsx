@@ -81,7 +81,12 @@ function InvoiceDetail() {
     order: { column: "paid_on", ascending: false },
   });
   const customers = useList<{ id: string; name: string }>("customers");
+  const extras = useList<AdditionalCost>("invoice_additional_costs", {
+    eq: { invoice_id: id },
+    order: { column: "created_at", ascending: true },
+  });
   const [payOpen, setPayOpen] = useState(false);
+  const [costOpen, setCostOpen] = useState(false);
 
   if (invoice.isLoading) return <Loading />;
   if (invoice.error) return <ErrorNote error={invoice.error} />;
@@ -90,11 +95,20 @@ function InvoiceDetail() {
   const inv = invoice.data;
   const customer = (customers.data ?? []).find((c) => c.id === inv.customer_id);
   const advance = splitAdvance(inv.grand_total, 50);
+  const costList = extras.data ?? [];
+  const locked = inv.locked || inv.status === "void";
+
+  const refreshTotals = async () => {
+    await recalcInvoice(inv.id);
+    qc.invalidateQueries({ queryKey: ["invoice_additional_costs"] });
+    qc.invalidateQueries({ queryKey: ["invoices"] });
+  };
 
   const setStatus = async (status: string) => {
+    // A sent invoice is an issued document: its lines and snapshot freeze.
     await updateRow("invoices", inv.id, {
       status,
-      ...(status === "sent" ? { issued_at: new Date().toISOString() } : {}),
+      ...(status === "sent" ? { issued_at: new Date().toISOString(), locked: true } : {}),
     });
     await logActivity("invoice", inv.id, `status → ${status}`);
     qc.invalidateQueries({ queryKey: ["invoices"] });
@@ -115,22 +129,47 @@ function InvoiceDetail() {
       await downloadDocumentPdf({
         kind: "Invoice",
         number: inv.number,
+        title: inv.quotation_snapshot?.number ? `Ref ${inv.quotation_snapshot.number}` : null,
         issue_date: inv.issue_date,
         secondary_label: "Due",
         secondary_date: inv.due_date,
         customer: parties[0],
         items,
         subtotal: inv.subtotal,
+        discount_total: inv.discount_total,
         tax_total: inv.tax_total,
         grand_total: inv.grand_total,
         paid_total: inv.paid_total,
         balance: inv.balance,
         notes: inv.notes,
+        extraRows: costList
+          .filter((c) => c.approval_status !== "rejected")
+          .map((c) => [`${humanize(c.cost_type)} — ${c.label}`, formatMoney(c.amount)]),
       });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not generate PDF");
     }
   };
+
+  const costFields: Field[] = [
+    { name: "label", label: "Description", required: true, full: true },
+    {
+      name: "cost_type",
+      label: "Type",
+      type: "select",
+      required: true,
+      options: COST_TYPES.map((c) => ({ value: c, label: humanize(c) })),
+    },
+    { name: "amount", label: "Amount (LKR)", type: "money", required: true },
+    {
+      name: "approval_status",
+      label: "Approval",
+      type: "select",
+      required: true,
+      options: ["pending", "approved", "rejected"].map((s) => ({ value: s, label: humanize(s) })),
+    },
+    { name: "notes", label: "Notes", type: "textarea" },
+  ];
 
 
 
