@@ -366,6 +366,21 @@ function InvoiceDetail() {
           toast.success("Payment recorded.");
         }}
       />
+
+      <RecordDialog
+        open={costOpen}
+        onOpenChange={setCostOpen}
+        title="Add additional cost"
+        description="Overtime, extra hours, travel or equipment. Approved costs increase the balance due."
+        fields={costFields}
+        initial={{ cost_type: "overtime", approval_status: "pending", amount: 0 }}
+        onSubmit={async (values) => {
+          await insertRow("invoice_additional_costs", { ...values, invoice_id: inv.id });
+          await refreshTotals();
+          setCostOpen(false);
+          toast.success("Additional cost added.");
+        }}
+      />
     </div>
   );
 }
