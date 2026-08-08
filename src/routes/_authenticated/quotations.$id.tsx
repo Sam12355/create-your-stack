@@ -495,7 +495,9 @@ function QuotationDetail() {
         parentKey="quotation_id"
         parentId={q.id}
         locked={!editable}
-        onChanged={() => recalcQuotation(q.id, advancePercent)}
+        onChanged={async () => {
+          await recalcQuotation(q.id, advancePercent);
+        }}
       />
 
       <Card className="mt-4">
