@@ -228,18 +228,21 @@ function QuotationsPage() {
         open={open}
         onOpenChange={setOpen}
         title="New quotation"
-        description="A draft is created — add line items on the next screen."
+        description="The customer's package, scope and pricing load automatically, with the advance split applied."
         fields={fields}
-        initial={{ issue_date: new Date().toISOString().slice(0, 10) }}
+        initial={{
+          issue_date: new Date().toISOString().slice(0, 10),
+          advance_percent: 50,
+          apply_intro_discount: false,
+        }}
         saving={saving}
         onSubmit={async (values) => {
           setSaving(true);
           try {
-            const number = await nextNumber("quotation");
-            const row = await insertRow<{ id: string }>("quotations", { ...values, number });
+            const created = await createQuotation(values);
             setOpen(false);
-            toast.success(`Quotation ${number} created.`);
-            navigate({ to: "/quotations/$id", params: { id: row.id } });
+            toast.success(`Quotation ${created.number} created.`);
+            navigate({ to: "/quotations/$id", params: { id: created.id } });
           } catch (e) {
             toast.error(e instanceof Error ? e.message : "Could not create quotation");
           } finally {
