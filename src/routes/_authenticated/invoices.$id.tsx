@@ -126,9 +126,13 @@ function InvoiceDetail() {
                 ))}
               </SelectContent>
             </Select>
+            <Button variant="outline" onClick={() => void exportPdf()}>
+              <FileDown className="mr-1.5 h-4 w-4" /> PDF
+            </Button>
             <Button variant="outline" onClick={() => window.print()}>
               <Printer className="mr-1.5 h-4 w-4" /> Print
             </Button>
+
             <Button onClick={() => setPayOpen(true)}>Record payment</Button>
           </>
         }
