@@ -19,6 +19,7 @@ import { Route as AuthenticatedLeadsRouteImport } from './routes/_authenticated/
 import { Route as AuthenticatedPackagesRouteImport } from './routes/_authenticated/packages'
 import { Route as AuthenticatedWorkflowsRouteImport } from './routes/_authenticated/workflows'
 import { Route as AuthenticatedProjectsIndexRouteImport } from './routes/_authenticated/projects.index'
+import { Route as AuthenticatedProjectsIdRouteImport } from './routes/_authenticated/projects.$id'
 import { Route as AuthenticatedQuotationsIndexRouteImport } from './routes/_authenticated/quotations.index'
 import { Route as AuthenticatedQuotationsIdRouteImport } from './routes/_authenticated/quotations.$id'
 import { Route as ApiPublicConfigDotjsRouteImport } from './routes/api/public/config[.]js'
@@ -73,6 +74,11 @@ const AuthenticatedProjectsIndexRoute =
     path: '/projects/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedProjectsIdRoute = AuthenticatedProjectsIdRouteImport.update({
+  id: '/projects/$id',
+  path: '/projects/$id',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 const AuthenticatedQuotationsIndexRoute =
   AuthenticatedQuotationsIndexRouteImport.update({
     id: '/quotations/',
@@ -100,6 +106,7 @@ export interface FileRoutesByFullPath {
   '/leads': typeof AuthenticatedLeadsRoute
   '/packages': typeof AuthenticatedPackagesRoute
   '/workflows': typeof AuthenticatedWorkflowsRoute
+  '/projects/$id': typeof AuthenticatedProjectsIdRoute
   '/quotations/$id': typeof AuthenticatedQuotationsIdRoute
   '/api/public/config.js': typeof ApiPublicConfigDotjsRoute
   '/projects/': typeof AuthenticatedProjectsIndexRoute
@@ -114,6 +121,7 @@ export interface FileRoutesByTo {
   '/leads': typeof AuthenticatedLeadsRoute
   '/packages': typeof AuthenticatedPackagesRoute
   '/workflows': typeof AuthenticatedWorkflowsRoute
+  '/projects/$id': typeof AuthenticatedProjectsIdRoute
   '/quotations/$id': typeof AuthenticatedQuotationsIdRoute
   '/api/public/config.js': typeof ApiPublicConfigDotjsRoute
   '/projects': typeof AuthenticatedProjectsIndexRoute
@@ -130,6 +138,7 @@ export interface FileRoutesById {
   '/_authenticated/leads': typeof AuthenticatedLeadsRoute
   '/_authenticated/packages': typeof AuthenticatedPackagesRoute
   '/_authenticated/workflows': typeof AuthenticatedWorkflowsRoute
+  '/_authenticated/projects/$id': typeof AuthenticatedProjectsIdRoute
   '/_authenticated/quotations/$id': typeof AuthenticatedQuotationsIdRoute
   '/api/public/config.js': typeof ApiPublicConfigDotjsRoute
   '/_authenticated/projects/': typeof AuthenticatedProjectsIndexRoute
@@ -146,6 +155,7 @@ export interface FileRouteTypes {
     | '/leads'
     | '/packages'
     | '/workflows'
+    | '/projects/$id'
     | '/quotations/$id'
     | '/api/public/config.js'
     | '/projects/'
@@ -160,6 +170,7 @@ export interface FileRouteTypes {
     | '/leads'
     | '/packages'
     | '/workflows'
+    | '/projects/$id'
     | '/quotations/$id'
     | '/api/public/config.js'
     | '/projects'
@@ -175,6 +186,7 @@ export interface FileRouteTypes {
     | '/_authenticated/leads'
     | '/_authenticated/packages'
     | '/_authenticated/workflows'
+    | '/_authenticated/projects/$id'
     | '/_authenticated/quotations/$id'
     | '/api/public/config.js'
     | '/_authenticated/projects/'
@@ -260,6 +272,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedProjectsIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/projects/$id': {
+      id: '/_authenticated/projects/$id'
+      path: '/projects/$id'
+      fullPath: '/projects/$id'
+      preLoaderRoute: typeof AuthenticatedProjectsIdRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/quotations/': {
       id: '/_authenticated/quotations/'
       path: '/quotations'
@@ -291,6 +310,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedLeadsRoute: typeof AuthenticatedLeadsRoute
   AuthenticatedPackagesRoute: typeof AuthenticatedPackagesRoute
   AuthenticatedWorkflowsRoute: typeof AuthenticatedWorkflowsRoute
+  AuthenticatedProjectsIdRoute: typeof AuthenticatedProjectsIdRoute
   AuthenticatedQuotationsIdRoute: typeof AuthenticatedQuotationsIdRoute
   AuthenticatedProjectsIndexRoute: typeof AuthenticatedProjectsIndexRoute
   AuthenticatedQuotationsIndexRoute: typeof AuthenticatedQuotationsIndexRoute
@@ -303,6 +323,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedLeadsRoute: AuthenticatedLeadsRoute,
   AuthenticatedPackagesRoute: AuthenticatedPackagesRoute,
   AuthenticatedWorkflowsRoute: AuthenticatedWorkflowsRoute,
+  AuthenticatedProjectsIdRoute: AuthenticatedProjectsIdRoute,
   AuthenticatedQuotationsIdRoute: AuthenticatedQuotationsIdRoute,
   AuthenticatedProjectsIndexRoute: AuthenticatedProjectsIndexRoute,
   AuthenticatedQuotationsIndexRoute: AuthenticatedQuotationsIndexRoute,
