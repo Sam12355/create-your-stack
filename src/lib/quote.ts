@@ -1,4 +1,4 @@
-import { insertRow, nextNumber, selectAll, updateRow, type Row } from "./api";
+import { insertRow, nextNumber, selectAll, type Row } from "./api";
 import { documentTotals, introDiscountFor, round, splitAdvance } from "./money";
 
 export type PackageRow = {
