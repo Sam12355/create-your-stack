@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { deleteRow, insertRow, logActivity, selectAll, updateRow, useList, useOne } from "@/lib/api";
 import { formatDate, formatMoney, splitAdvance } from "@/lib/money";
 import { downloadDocumentPdf, type PdfLine } from "@/lib/pdf";
+import { recalcInvoice } from "@/lib/quote";
 
 import { PageHeader } from "@/components/app-shell";
 import { LineItems } from "@/components/line-items";
