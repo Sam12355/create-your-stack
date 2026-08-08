@@ -48,12 +48,15 @@ export function LineItems({
   parentKey,
   parentId,
   locked,
+  onChanged,
 }: {
   table: "quotation_items" | "invoice_items";
   parentTable: "quotations" | "invoices";
   parentKey: "quotation_id" | "invoice_id";
   parentId: string;
   locked?: boolean;
+  /** Called after any add / edit / remove so the parent can recalculate. */
+  onChanged?: () => void | Promise<void>;
 }) {
   const qc = useQueryClient();
   const items = useList<LineItem>(table, {
@@ -70,9 +73,11 @@ export function LineItems({
   const totals = documentTotals(rows);
 
   const refresh = async () => {
+    await onChanged?.();
     await qc.invalidateQueries({ queryKey: [table] });
     await qc.invalidateQueries({ queryKey: [parentTable] });
   };
+
 
   const pushTotals = async (next: LineItem[]) => {
     const t = documentTotals(next);
@@ -129,10 +134,12 @@ export function LineItems({
   };
 
   const drop = async (row: LineItem) => {
+    if (!confirm(`Remove line item "${row.description}"?`)) return;
     await deleteRow(table, row.id);
     await pushTotals(rows.filter((r) => r.id !== row.id));
     await refresh();
   };
+
 
   return (
     <div className="rounded-lg border border-border bg-background">

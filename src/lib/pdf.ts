@@ -24,30 +24,42 @@ export type PdfParty = {
 
 export type PdfDoc = {
   kind: "Quotation" | "Invoice" | "Receipt";
+  /** Big heading printed top-right, e.g. "FINAL INVOICE". Defaults to kind. */
+  heading?: string;
   number: string;
   title?: string | null;
   issue_date: string;
   secondary_label?: string;
   secondary_date?: string | null;
+  /** "Ref: VYBE-QUO-2026-0001 · 12 Mar 2026" style reference line. */
+  reference?: string | null;
   customer?: PdfParty | undefined;
   items: PdfLine[];
   subtotal: number;
   discount_total?: number;
   tax_total: number;
   grand_total: number;
+  additional_total?: number;
   paid_total?: number;
   balance?: number;
   notes?: string | null;
   extraRows?: Array<[string, string]>;
+  /** Additional-cost rows printed as a second table under the line items. */
+  additionalRows?: Array<[string, string, string, string]>;
   /** Scope / inclusions frozen on the document at issue time. */
   scope?: string[];
   /** Advance payment split printed under the totals. */
   advance?: { percent: number; amount: number; balance: number } | undefined;
   /** Extra terms printed above the settings terms (already snapshotted). */
   terms?: string | null;
+  /** Document-level overrides for the settings defaults. */
+  bank_details?: string | null;
+  payment_instructions?: string | null;
+  payment_status?: string | null;
   /** Print the signature line at the end of the document. */
   signature?: boolean;
 };
+
 
 type Settings = {
   business_name: string;
@@ -143,10 +155,11 @@ export async function downloadDocumentPdf(doc: PdfDoc): Promise<void> {
 
   // Document title block (right)
   const brand = rgb(settings?.brand_primary);
+  const heading = (doc.heading ?? doc.kind).toUpperCase();
   pdf.setTextColor(brand[0], brand[1], brand[2]);
   pdf.setFont("helvetica", "bold");
-  pdf.setFontSize(20);
-  pdf.text(doc.kind.toUpperCase(), pageWidth - MARGIN, y, { align: "right" });
+  pdf.setFontSize(heading.length > 12 ? 16 : 20);
+  pdf.text(heading, pageWidth - MARGIN, y, { align: "right" });
   pdf.setTextColor(20);
   pdf.setFont("helvetica", "normal");
   pdf.setFontSize(10);
@@ -154,21 +167,36 @@ export async function downloadDocumentPdf(doc: PdfDoc): Promise<void> {
   pdf.setTextColor(110);
   pdf.setFontSize(9);
   pdf.text(`Date: ${formatDate(doc.issue_date)}`, pageWidth - MARGIN, y + 30, { align: "right" });
+  let ry = y + 42;
   if (doc.secondary_date) {
     pdf.text(
       `${doc.secondary_label ?? "Valid until"}: ${formatDate(doc.secondary_date)}`,
       pageWidth - MARGIN,
-      y + 42,
+      ry,
       { align: "right" },
     );
+    ry += 12;
+  }
+  if (doc.reference) {
+    pdf.text(doc.reference, pageWidth - MARGIN, ry, { align: "right" });
+    ry += 12;
+  }
+  if (doc.payment_status) {
+    pdf.setFont("helvetica", "bold");
+    pdf.setTextColor(brand[0], brand[1], brand[2]);
+    pdf.text(doc.payment_status, pageWidth - MARGIN, ry, { align: "right" });
+    pdf.setFont("helvetica", "normal");
+    pdf.setTextColor(110);
+    ry += 12;
   }
 
-  y = Math.max(cy, y + 56) + 12;
+  y = Math.max(cy, ry, y + 56) + 12;
   pdf.setDrawColor(brand[0], brand[1], brand[2]);
   pdf.setLineWidth(1.4);
   pdf.line(MARGIN, y, pageWidth - MARGIN, y);
   pdf.setLineWidth(0.5);
   y += 20;
+
 
   // Bill to
   pdf.setTextColor(110);
@@ -247,14 +275,37 @@ export async function downloadDocumentPdf(doc: PdfDoc): Promise<void> {
     },
   });
 
-  const afterTable =
+  let afterTable =
     (pdf as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? y;
+
+  // Additional costs (approved extras added during the project)
+  if (doc.additionalRows && doc.additionalRows.length > 0) {
+    autoTable(pdf, {
+      startY: afterTable + 16,
+      margin: { left: MARGIN, right: MARGIN },
+      head: [["Additional cost", "Qty", "Unit price", "Amount"]],
+      body: doc.additionalRows.map((r) => [...r]),
+      styles: { fontSize: 9, cellPadding: 6, textColor: 30, lineColor: 225, lineWidth: 0.5 },
+      headStyles: { fillColor: [244, 246, 250], textColor: 60, fontStyle: "bold" },
+      columnStyles: {
+        1: { halign: "right", cellWidth: 44 },
+        2: { halign: "right", cellWidth: 76 },
+        3: { halign: "right", cellWidth: 84 },
+      },
+    });
+    afterTable =
+      (pdf as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ??
+      afterTable;
+  }
+
   let ty = afterTable + 18;
+
 
   // Totals
   const totals: Array<[string, string]> = [["Subtotal", formatMoney(doc.subtotal)]];
   if (doc.discount_total) totals.push(["Discount", `- ${formatMoney(doc.discount_total)}`]);
   if (doc.tax_total) totals.push(["Tax", formatMoney(doc.tax_total)]);
+  if (doc.additional_total) totals.push(["Additional costs", formatMoney(doc.additional_total)]);
   totals.push(["Total", formatMoney(doc.grand_total)]);
   if (doc.advance) {
     totals.push([`Advance (${doc.advance.percent}%)`, formatMoney(doc.advance.amount)]);
@@ -301,12 +352,13 @@ export async function downloadDocumentPdf(doc: PdfDoc): Promise<void> {
 
   block("Notes", doc.notes);
   block("Payment terms", settings?.advance_term);
-  block("Payment instructions", settings?.payment_instructions);
-  if (doc.kind !== "Quotation") block("Bank details", settings?.bank_details);
+  block("Payment instructions", doc.payment_instructions ?? settings?.payment_instructions);
+  block("Bank details", doc.bank_details ?? settings?.bank_details);
   block(
     "Terms & conditions",
     doc.terms ?? (doc.kind === "Quotation" ? settings?.quotation_terms : settings?.invoice_terms),
   );
+
 
   if (doc.signature !== false) {
     if (ny > pdf.internal.pageSize.getHeight() - 110) {
@@ -343,5 +395,5 @@ export async function downloadDocumentPdf(doc: PdfDoc): Promise<void> {
     );
   }
 
-  pdf.save(`${doc.kind}-${doc.number}.pdf`);
+  pdf.save(`${(doc.heading ?? doc.kind).replace(/\s+/g, "-")}-${doc.number}.pdf`);
 }

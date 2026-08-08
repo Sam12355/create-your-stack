@@ -1,4 +1,4 @@
-import { insertRow, nextNumber, selectAll, updateRow, type Row } from "./api";
+import { insertRow, nextNumber, selectAll, type Row } from "./api";
 import { documentTotals, introDiscountFor, round, splitAdvance } from "./money";
 
 export type PackageRow = {
@@ -149,36 +149,9 @@ export async function createQuotationFromPackage(input: {
   return { id: quotation.id, number };
 }
 
-/** Recalculate an invoice from its line items plus approved additional costs. */
-export async function recalcInvoice(invoiceId: string) {
-  const items = await selectAll<{
-    quantity: number;
-    unit_price: number;
-    discount: number;
-    tax_rate: number;
-  }>("invoice_items", { eq: { invoice_id: invoiceId } });
-  const extras = await selectAll<{ amount: number; approval_status: string }>(
-    "invoice_additional_costs",
-    { eq: { invoice_id: invoiceId } },
-  );
-  const totals = documentTotals(items);
-  const additional = extras
-    .filter((e) => e.approval_status !== "rejected")
-    .reduce((s, e) => s + Number(e.amount), 0);
-  const grand = round(totals.grand_total + additional).toNumber();
+/**
+ * Recalculate an invoice from its line items, approved additional costs and
+ * adjustments. Kept as a re-export so existing callers keep working.
+ */
+export { recalcInvoice } from "./documents";
 
-  const current = await selectAll<{ paid_total: number }>("invoices", {
-    eq: { id: invoiceId },
-    select: "paid_total",
-    limit: 1,
-  });
-  const paid = Number(current[0]?.paid_total ?? 0);
-
-  await updateRow("invoices", invoiceId, {
-    ...totals,
-    additional_total: round(additional).toNumber(),
-    grand_total: grand,
-    balance: round(grand - paid).toNumber(),
-  });
-  return { grand_total: grand, additional_total: additional };
-}
