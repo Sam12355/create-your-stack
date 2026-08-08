@@ -172,6 +172,10 @@ function ProjectDetail() {
         <StatCard label="Costs" value={formatMoney(spent)} hint="project expenses" tone="danger" />
       </div>
 
+      <div className="mt-4">
+        <StageTracker projectId={p.id} projectTitle={p.title} customerId={p.customer_id} />
+      </div>
+
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <Card>
           <CardHeader className="pb-3">
