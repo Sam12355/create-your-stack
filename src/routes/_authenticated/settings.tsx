@@ -34,6 +34,11 @@ const FIELDS: Field[] = [
   { name: "reminder_days_before_due", label: "Remind days before due", type: "number" },
   { name: "address", label: "Address", type: "textarea" },
   { name: "bank_details", label: "Bank details", type: "textarea" },
+  { name: "brand_primary", label: "Brand colour (hex)", placeholder: "#6D28D9" },
+  { name: "signature_label", label: "Signature label", placeholder: "For VYBE Creative Media" },
+  { name: "default_advance_percent", label: "Default advance %", type: "number" },
+  { name: "advance_term", label: "Advance payment term", type: "textarea" },
+  { name: "quotation_terms", label: "Quotation terms", type: "textarea" },
   { name: "invoice_terms", label: "Invoice terms", type: "textarea" },
   { name: "website_terms", label: "Website project terms", type: "textarea" },
 ];

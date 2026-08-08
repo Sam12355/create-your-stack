@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { deleteRow, insertRow, logActivity, selectAll, updateRow, useList, useOne } from "@/lib/api";
 import { formatDate, formatMoney, splitAdvance } from "@/lib/money";
 import { downloadDocumentPdf, type PdfLine } from "@/lib/pdf";
+import { recalcInvoice } from "@/lib/quote";
 
 import { PageHeader } from "@/components/app-shell";
 import { LineItems } from "@/components/line-items";
@@ -39,13 +40,18 @@ type Invoice = {
   issue_date: string;
   due_date: string | null;
   subtotal: number;
+  discount_total: number;
   tax_total: number;
   grand_total: number;
+  additional_total: number;
+  advance_expected: number;
   paid_total: number;
   balance: number;
   notes: string | null;
   locked: boolean;
   milestone_label: string | null;
+  quotation_id: string | null;
+  quotation_snapshot: { number?: string; package_snapshot?: { name?: string } } | null;
 };
 type Payment = {
   id: string;
@@ -54,9 +60,18 @@ type Payment = {
   paid_on: string;
   reference: string | null;
 };
+type AdditionalCost = {
+  id: string;
+  label: string;
+  cost_type: string;
+  amount: number;
+  approval_status: string;
+  notes: string | null;
+};
 
 const STATUSES = ["draft", "sent", "partially_paid", "paid", "overdue", "void"];
 const METHODS = ["cash", "bank_transfer", "card", "cheque", "online", "other"];
+const COST_TYPES = ["overtime", "extra_hours", "travel", "equipment", "revision", "other"];
 
 function InvoiceDetail() {
   const { id } = Route.useParams();
@@ -67,7 +82,12 @@ function InvoiceDetail() {
     order: { column: "paid_on", ascending: false },
   });
   const customers = useList<{ id: string; name: string }>("customers");
+  const extras = useList<AdditionalCost>("invoice_additional_costs", {
+    eq: { invoice_id: id },
+    order: { column: "created_at", ascending: true },
+  });
   const [payOpen, setPayOpen] = useState(false);
+  const [costOpen, setCostOpen] = useState(false);
 
   if (invoice.isLoading) return <Loading />;
   if (invoice.error) return <ErrorNote error={invoice.error} />;
@@ -76,11 +96,20 @@ function InvoiceDetail() {
   const inv = invoice.data;
   const customer = (customers.data ?? []).find((c) => c.id === inv.customer_id);
   const advance = splitAdvance(inv.grand_total, 50);
+  const costList = extras.data ?? [];
+  const locked = inv.locked || inv.status === "void";
+
+  const refreshTotals = async () => {
+    await recalcInvoice(inv.id);
+    qc.invalidateQueries({ queryKey: ["invoice_additional_costs"] });
+    qc.invalidateQueries({ queryKey: ["invoices"] });
+  };
 
   const setStatus = async (status: string) => {
+    // A sent invoice is an issued document: its lines and snapshot freeze.
     await updateRow("invoices", inv.id, {
       status,
-      ...(status === "sent" ? { issued_at: new Date().toISOString() } : {}),
+      ...(status === "sent" ? { issued_at: new Date().toISOString(), locked: true } : {}),
     });
     await logActivity("invoice", inv.id, `status → ${status}`);
     qc.invalidateQueries({ queryKey: ["invoices"] });
@@ -101,22 +130,47 @@ function InvoiceDetail() {
       await downloadDocumentPdf({
         kind: "Invoice",
         number: inv.number,
+        title: inv.quotation_snapshot?.number ? `Ref ${inv.quotation_snapshot.number}` : null,
         issue_date: inv.issue_date,
         secondary_label: "Due",
         secondary_date: inv.due_date,
         customer: parties[0],
         items,
         subtotal: inv.subtotal,
+        discount_total: inv.discount_total,
         tax_total: inv.tax_total,
         grand_total: inv.grand_total,
         paid_total: inv.paid_total,
         balance: inv.balance,
         notes: inv.notes,
+        extraRows: costList
+          .filter((c) => c.approval_status !== "rejected")
+          .map((c) => [`${humanize(c.cost_type)} — ${c.label}`, formatMoney(c.amount)]),
       });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not generate PDF");
     }
   };
+
+  const costFields: Field[] = [
+    { name: "label", label: "Description", required: true, full: true },
+    {
+      name: "cost_type",
+      label: "Type",
+      type: "select",
+      required: true,
+      options: COST_TYPES.map((c) => ({ value: c, label: humanize(c) })),
+    },
+    { name: "amount", label: "Amount (LKR)", type: "money", required: true },
+    {
+      name: "approval_status",
+      label: "Approval",
+      type: "select",
+      required: true,
+      options: ["pending", "approved", "rejected"].map((s) => ({ value: s, label: humanize(s) })),
+    },
+    { name: "notes", label: "Notes", type: "textarea" },
+  ];
 
 
 
@@ -174,14 +228,19 @@ function InvoiceDetail() {
         }
       />
 
-      <div className="mb-4 grid gap-3 sm:grid-cols-4">
+      <div className="mb-4 grid gap-3 sm:grid-cols-5">
         <StatCard label="Grand total" value={formatMoney(inv.grand_total)} tone="primary" />
+        <StatCard
+          label="Additional costs"
+          value={formatMoney(inv.additional_total ?? 0)}
+          hint="Overtime, travel, extras"
+        />
         <StatCard label="Paid" value={formatMoney(inv.paid_total)} tone="success" />
-        <StatCard label="Balance" value={formatMoney(inv.balance)} tone="warning" />
+        <StatCard label="Balance due" value={formatMoney(inv.balance)} tone="warning" />
         <StatCard
           label="Due"
           value={formatDate(inv.due_date)}
-          hint={`50% advance = ${formatMoney(advance.advance)}`}
+          hint={`Advance expected ${formatMoney(inv.advance_expected || advance.advance)}`}
           tone="info"
         />
       </div>
@@ -191,8 +250,57 @@ function InvoiceDetail() {
         parentTable="invoices"
         parentKey="invoice_id"
         parentId={inv.id}
-        locked={inv.locked || inv.status === "void"}
+        locked={locked}
       />
+
+      <Card className="mt-4">
+        <CardHeader className="flex flex-row items-center justify-between pb-3">
+          <CardTitle className="text-base">Additional costs</CardTitle>
+          <Button size="sm" variant="outline" disabled={locked} onClick={() => setCostOpen(true)}>
+            Add cost
+          </Button>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {costList.length === 0 ? (
+            <EmptyState
+              title="No additional costs"
+              description="Add overtime, extra hours, travel or equipment charges — the balance recalculates."
+            />
+          ) : (
+            costList.map((c) => (
+              <div
+                key={c.id}
+                className="flex items-center justify-between rounded-md border border-border px-3 py-2 text-sm"
+              >
+                <span className="flex items-center gap-2">
+                  <span className="font-medium">{c.label}</span>
+                  <StatusBadge value={c.cost_type} />
+                  <StatusBadge value={c.approval_status} />
+                  {c.notes ? (
+                    <span className="text-xs text-muted-foreground">{c.notes}</span>
+                  ) : null}
+                </span>
+                <span className="flex items-center gap-3">
+                  <span className="tabular font-medium">{formatMoney(c.amount)}</span>
+                  <button
+                    aria-label="Delete additional cost"
+                    className="text-muted-foreground hover:text-destructive disabled:opacity-40"
+                    disabled={locked}
+                    onClick={async () => {
+                      if (!confirm("Remove this additional cost?")) return;
+                      await deleteRow("invoice_additional_costs", c.id);
+                      await refreshTotals();
+                    }}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </span>
+              </div>
+            ))
+          )}
+        </CardContent>
+      </Card>
+
 
       <Card className="mt-4">
         <CardHeader className="pb-3">
@@ -256,6 +364,21 @@ function InvoiceDetail() {
           qc.invalidateQueries({ queryKey: ["invoices"] });
           setPayOpen(false);
           toast.success("Payment recorded.");
+        }}
+      />
+
+      <RecordDialog
+        open={costOpen}
+        onOpenChange={setCostOpen}
+        title="Add additional cost"
+        description="Overtime, extra hours, travel or equipment. Approved costs increase the balance due."
+        fields={costFields}
+        initial={{ cost_type: "overtime", approval_status: "pending", amount: 0 }}
+        onSubmit={async (values) => {
+          await insertRow("invoice_additional_costs", { ...values, invoice_id: inv.id });
+          await refreshTotals();
+          setCostOpen(false);
+          toast.success("Additional cost added.");
         }}
       />
     </div>

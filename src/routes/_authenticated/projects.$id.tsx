@@ -14,6 +14,7 @@ import {
 import { formatDate, formatDateTime, formatMoney } from "@/lib/money";
 import { PageHeader } from "@/components/app-shell";
 import { RecordDialog, type Field } from "@/components/record-dialog";
+import { StageTracker } from "@/components/stage-tracker";
 import { EmptyState, ErrorNote, Loading, StatCard, StatusBadge, humanize } from "@/components/ui-bits";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -170,6 +171,10 @@ function ProjectDetail() {
         <StatCard label="Agreed value" value={formatMoney(p.agreed_total)} tone="info" />
         <StatCard label="Invoiced" value={formatMoney(invoiced)} hint={`${formatMoney(outstanding)} outstanding`} tone="warning" />
         <StatCard label="Costs" value={formatMoney(spent)} hint="project expenses" tone="danger" />
+      </div>
+
+      <div className="mt-4">
+        <StageTracker projectId={p.id} projectTitle={p.title} customerId={p.customer_id} />
       </div>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2">

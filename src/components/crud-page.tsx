@@ -36,6 +36,7 @@ export function CrudPage<T extends { id: string }>({
   rowActions,
   toolbar,
   transform,
+  afterSave,
 }: {
   table: string;
   title: string;
@@ -49,6 +50,7 @@ export function CrudPage<T extends { id: string }>({
   rowActions?: (row: T) => ReactNode;
   toolbar?: ReactNode;
   transform?: (values: Values) => Row;
+  afterSave?: (row: Row, values: Values, isNew: boolean) => Promise<void> | void;
 }) {
   const listOpts = order ? { order } : {};
   const { data, isLoading, error } = useList<T>(table, listOpts);
@@ -176,12 +178,13 @@ export function CrudPage<T extends { id: string }>({
         saving={save.isPending}
         onSubmit={async (values) => {
           try {
-            await save.mutateAsync({
+            const saved = (await save.mutateAsync({
               ...(editing ? { id: editing.id } : {}),
               values: transform ? transform(values) : (values as Row),
-            });
+            })) as Row;
             setOpen(false);
             toast.success("Saved.");
+            await afterSave?.(saved, values, !editing);
           } catch (e) {
             toast.error(e instanceof Error ? e.message : "Save failed");
           }

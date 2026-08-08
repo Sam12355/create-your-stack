@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -15,7 +16,9 @@ import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -35,11 +38,13 @@ export type FieldType =
   | "switch";
 
 
+export type FieldOption = { value: string; label: string; group?: string };
+
 export type Field = {
   name: string;
   label: string;
   type?: FieldType;
-  options?: { value: string; label: string }[];
+  options?: FieldOption[];
   placeholder?: string;
   required?: boolean;
   full?: boolean;
@@ -54,6 +59,19 @@ export function toInputValue(v: unknown, type?: FieldType) {
   if (type === "date" && typeof v === "string") return v.slice(0, 10);
   return String(v);
 }
+
+/** Preserve option order while collecting them under their optional group heading. */
+function groupOptions(options: FieldOption[]): Array<[string | null, FieldOption[]]> {
+  const out: Array<[string | null, FieldOption[]]> = [];
+  for (const o of options) {
+    const key = o.group ?? null;
+    const last = out[out.length - 1];
+    if (last && last[0] === key) last[1].push(o);
+    else out.push([key, [o]]);
+  }
+  return out;
+}
+
 
 export function FieldGrid({
   fields,
@@ -107,11 +125,24 @@ export function FieldGrid({
               </SelectTrigger>
               <SelectContent>
                 {!f.required ? <SelectItem value="__none">— None —</SelectItem> : null}
-                {(f.options ?? []).map((o) => (
-                  <SelectItem key={o.value} value={o.value}>
-                    {o.label}
-                  </SelectItem>
-                ))}
+                {groupOptions(f.options ?? []).map(([group, opts]) =>
+                  group ? (
+                    <SelectGroup key={group}>
+                      <SelectLabel>{group}</SelectLabel>
+                      {opts.map((o) => (
+                        <SelectItem key={o.value} value={o.value}>
+                          {o.label}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  ) : (
+                    opts.map((o) => (
+                      <SelectItem key={o.value} value={o.value}>
+                        {o.label}
+                      </SelectItem>
+                    ))
+                  ),
+                )}
               </SelectContent>
             </Select>
           ) : f.type === "switch" ? (
@@ -193,6 +224,17 @@ export function RecordDialog({
           className="space-y-4"
           onSubmit={(e) => {
             e.preventDefault();
+            const missing = fields.find(
+              (f) =>
+                f.required &&
+                (values[f.name] === undefined ||
+                  values[f.name] === null ||
+                  values[f.name] === ""),
+            );
+            if (missing) {
+              toast.error(`${missing.label} is required.`);
+              return;
+            }
             void onSubmit(values);
           }}
         >
