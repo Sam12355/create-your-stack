@@ -16,6 +16,7 @@ import {
   Settings as SettingsIcon,
   Bell,
   Workflow,
+  ListChecks,
   LogOut,
   UserCog,
 } from "lucide-react";
