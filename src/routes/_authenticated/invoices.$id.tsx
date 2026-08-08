@@ -1,10 +1,12 @@
 import { useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Printer, Trash2 } from "lucide-react";
+import { ArrowLeft, FileDown, Printer, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { deleteRow, insertRow, logActivity, updateRow, useList, useOne } from "@/lib/api";
+import { deleteRow, insertRow, logActivity, selectAll, updateRow, useList, useOne } from "@/lib/api";
 import { formatDate, formatMoney, splitAdvance } from "@/lib/money";
+import { downloadDocumentPdf, type PdfLine } from "@/lib/pdf";
+
 import { PageHeader } from "@/components/app-shell";
 import { LineItems } from "@/components/line-items";
 import { RecordDialog, type Field } from "@/components/record-dialog";
