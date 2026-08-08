@@ -43,10 +43,18 @@ const STATUS_TONE: Record<string, keyof typeof TONE> = {
   paid: "success",
   overdue: "danger",
   void: "neutral",
+  revised: "warning",
+  awaiting_response: "warning",
+  approved: "success",
+  pending: "warning",
+  advance_pending: "warning",
+  advance_partially_paid: "info",
+  advance_paid: "success",
   // generic
   scheduled: "info",
   completed: "success",
 };
+
 
 export function humanize(value?: string | null) {
   if (!value) return "—";
