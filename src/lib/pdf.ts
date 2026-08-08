@@ -154,10 +154,11 @@ export async function downloadDocumentPdf(doc: PdfDoc): Promise<void> {
 
   // Document title block (right)
   const brand = rgb(settings?.brand_primary);
+  const heading = (doc.heading ?? doc.kind).toUpperCase();
   pdf.setTextColor(brand[0], brand[1], brand[2]);
   pdf.setFont("helvetica", "bold");
-  pdf.setFontSize(20);
-  pdf.text(doc.kind.toUpperCase(), pageWidth - MARGIN, y, { align: "right" });
+  pdf.setFontSize(heading.length > 12 ? 16 : 20);
+  pdf.text(heading, pageWidth - MARGIN, y, { align: "right" });
   pdf.setTextColor(20);
   pdf.setFont("helvetica", "normal");
   pdf.setFontSize(10);
@@ -165,21 +166,36 @@ export async function downloadDocumentPdf(doc: PdfDoc): Promise<void> {
   pdf.setTextColor(110);
   pdf.setFontSize(9);
   pdf.text(`Date: ${formatDate(doc.issue_date)}`, pageWidth - MARGIN, y + 30, { align: "right" });
+  let ry = y + 42;
   if (doc.secondary_date) {
     pdf.text(
       `${doc.secondary_label ?? "Valid until"}: ${formatDate(doc.secondary_date)}`,
       pageWidth - MARGIN,
-      y + 42,
+      ry,
       { align: "right" },
     );
+    ry += 12;
+  }
+  if (doc.reference) {
+    pdf.text(doc.reference, pageWidth - MARGIN, ry, { align: "right" });
+    ry += 12;
+  }
+  if (doc.payment_status) {
+    pdf.setFont("helvetica", "bold");
+    pdf.setTextColor(brand[0], brand[1], brand[2]);
+    pdf.text(doc.payment_status, pageWidth - MARGIN, ry, { align: "right" });
+    pdf.setFont("helvetica", "normal");
+    pdf.setTextColor(110);
+    ry += 12;
   }
 
-  y = Math.max(cy, y + 56) + 12;
+  y = Math.max(cy, ry, y + 56) + 12;
   pdf.setDrawColor(brand[0], brand[1], brand[2]);
   pdf.setLineWidth(1.4);
   pdf.line(MARGIN, y, pageWidth - MARGIN, y);
   pdf.setLineWidth(0.5);
   y += 20;
+
 
   // Bill to
   pdf.setTextColor(110);
