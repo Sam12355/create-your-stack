@@ -350,12 +350,13 @@ export async function downloadDocumentPdf(doc: PdfDoc): Promise<void> {
 
   block("Notes", doc.notes);
   block("Payment terms", settings?.advance_term);
-  block("Payment instructions", settings?.payment_instructions);
-  if (doc.kind !== "Quotation") block("Bank details", settings?.bank_details);
+  block("Payment instructions", doc.payment_instructions ?? settings?.payment_instructions);
+  block("Bank details", doc.bank_details ?? settings?.bank_details);
   block(
     "Terms & conditions",
     doc.terms ?? (doc.kind === "Quotation" ? settings?.quotation_terms : settings?.invoice_terms),
   );
+
 
   if (doc.signature !== false) {
     if (ny > pdf.internal.pageSize.getHeight() - 110) {
