@@ -228,14 +228,19 @@ function InvoiceDetail() {
         }
       />
 
-      <div className="mb-4 grid gap-3 sm:grid-cols-4">
+      <div className="mb-4 grid gap-3 sm:grid-cols-5">
         <StatCard label="Grand total" value={formatMoney(inv.grand_total)} tone="primary" />
+        <StatCard
+          label="Additional costs"
+          value={formatMoney(inv.additional_total ?? 0)}
+          hint="Overtime, travel, extras"
+        />
         <StatCard label="Paid" value={formatMoney(inv.paid_total)} tone="success" />
-        <StatCard label="Balance" value={formatMoney(inv.balance)} tone="warning" />
+        <StatCard label="Balance due" value={formatMoney(inv.balance)} tone="warning" />
         <StatCard
           label="Due"
           value={formatDate(inv.due_date)}
-          hint={`50% advance = ${formatMoney(advance.advance)}`}
+          hint={`Advance expected ${formatMoney(inv.advance_expected || advance.advance)}`}
           tone="info"
         />
       </div>
@@ -245,8 +250,57 @@ function InvoiceDetail() {
         parentTable="invoices"
         parentKey="invoice_id"
         parentId={inv.id}
-        locked={inv.locked || inv.status === "void"}
+        locked={locked}
       />
+
+      <Card className="mt-4">
+        <CardHeader className="flex flex-row items-center justify-between pb-3">
+          <CardTitle className="text-base">Additional costs</CardTitle>
+          <Button size="sm" variant="outline" disabled={locked} onClick={() => setCostOpen(true)}>
+            Add cost
+          </Button>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {costList.length === 0 ? (
+            <EmptyState
+              title="No additional costs"
+              description="Add overtime, extra hours, travel or equipment charges — the balance recalculates."
+            />
+          ) : (
+            costList.map((c) => (
+              <div
+                key={c.id}
+                className="flex items-center justify-between rounded-md border border-border px-3 py-2 text-sm"
+              >
+                <span className="flex items-center gap-2">
+                  <span className="font-medium">{c.label}</span>
+                  <StatusBadge value={c.cost_type} />
+                  <StatusBadge value={c.approval_status} />
+                  {c.notes ? (
+                    <span className="text-xs text-muted-foreground">{c.notes}</span>
+                  ) : null}
+                </span>
+                <span className="flex items-center gap-3">
+                  <span className="tabular font-medium">{formatMoney(c.amount)}</span>
+                  <button
+                    aria-label="Delete additional cost"
+                    className="text-muted-foreground hover:text-destructive disabled:opacity-40"
+                    disabled={locked}
+                    onClick={async () => {
+                      if (!confirm("Remove this additional cost?")) return;
+                      await deleteRow("invoice_additional_costs", c.id);
+                      await refreshTotals();
+                    }}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </span>
+              </div>
+            ))
+          )}
+        </CardContent>
+      </Card>
+
 
       <Card className="mt-4">
         <CardHeader className="pb-3">
