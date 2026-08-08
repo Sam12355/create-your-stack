@@ -86,6 +86,40 @@ function InvoiceDetail() {
     qc.invalidateQueries({ queryKey: ["invoices"] });
   };
 
+  const exportPdf = async () => {
+    try {
+      const items = await selectAll<PdfLine>("invoice_items", { eq: { invoice_id: inv.id } });
+      const parties = inv.customer_id
+        ? await selectAll<{
+            name: string;
+            company: string | null;
+            address: string | null;
+            phone: string | null;
+            email: string | null;
+          }>("customers", { eq: { id: inv.customer_id } })
+        : [];
+      await downloadDocumentPdf({
+        kind: "Invoice",
+        number: inv.number,
+        issue_date: inv.issue_date,
+        secondary_label: "Due",
+        secondary_date: inv.due_date,
+        customer: parties[0],
+        items,
+        subtotal: inv.subtotal,
+        tax_total: inv.tax_total,
+        grand_total: inv.grand_total,
+        paid_total: inv.paid_total,
+        balance: inv.balance,
+        notes: inv.notes,
+      });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not generate PDF");
+    }
+  };
+
+
+
   const paymentFields: Field[] = [
     { name: "amount", label: "Amount (LKR)", type: "money", required: true },
     {
