@@ -57,26 +57,17 @@ export function LineItems({
 }) {
   const qc = useQueryClient();
   const items = useList<LineItem>(table, {
-    filters: { [parentKey]: parentId },
+    eq: { [parentKey]: parentId },
     order: { column: "position", ascending: true },
   });
   const packages = useList<Pkg>("packages", {
-    filters: { is_active: true },
+    eq: { is_active: true },
     order: { column: "name", ascending: true },
   });
   const [busy, setBusy] = useState(false);
 
   const rows = items.data ?? [];
   const totals = documentTotals(rows);
-
-  const syncTotals = async () => {
-    const fresh = await qc.fetchQuery({
-      queryKey: [table, { filters: { [parentKey]: parentId } }],
-      queryFn: () => Promise.resolve(rows),
-    });
-    void fresh;
-  };
-  void syncTotals;
 
   const refresh = async () => {
     await qc.invalidateQueries({ queryKey: [table] });
@@ -87,9 +78,9 @@ export function LineItems({
     const t = documentTotals(next);
     await updateRow(parentTable, parentId, {
       subtotal: t.subtotal,
-      discount_total: t.discountTotal,
-      tax_total: t.taxTotal,
-      grand_total: t.grandTotal,
+      discount_total: t.discount_total,
+      tax_total: t.tax_total,
+      grand_total: t.grand_total,
     });
   };
 
@@ -110,7 +101,7 @@ export function LineItems({
           unit_price: values.unit_price ?? 0,
           discount: values.discount ?? 0,
           tax_rate: values.tax_rate ?? 0,
-        }).toNumber(),
+        }).total.toNumber(),
       } as Row;
       const created = await insertRow<LineItem>(table, item);
       await pushTotals([...rows, created]);
@@ -124,7 +115,7 @@ export function LineItems({
 
   const patch = async (row: LineItem, changes: Partial<LineItem>) => {
     const merged = { ...row, ...changes };
-    merged.line_total = lineTotal(merged).toNumber();
+    merged.line_total = lineTotal(merged).total.toNumber();
     await updateRow(table, row.id, {
       description: merged.description,
       quantity: merged.quantity,
@@ -255,15 +246,15 @@ export function LineItems({
           </div>
           <div className="flex justify-between">
             <dt className="text-muted-foreground">Discount</dt>
-            <dd className="tabular">−{formatMoney(totals.discountTotal)}</dd>
+            <dd className="tabular">−{formatMoney(totals.discount_total)}</dd>
           </div>
           <div className="flex justify-between">
             <dt className="text-muted-foreground">Tax</dt>
-            <dd className="tabular">{formatMoney(totals.taxTotal)}</dd>
+            <dd className="tabular">{formatMoney(totals.tax_total)}</dd>
           </div>
           <div className="flex justify-between border-t border-border pt-1 font-semibold">
             <dt>Grand total</dt>
-            <dd className="tabular">{formatMoney(totals.grandTotal)}</dd>
+            <dd className="tabular">{formatMoney(totals.grand_total)}</dd>
           </div>
         </dl>
       </div>
