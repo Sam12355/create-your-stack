@@ -46,6 +46,17 @@ export type PdfDoc = {
   extraRows?: Array<[string, string]>;
   /** Additional-cost rows printed as a second table under the line items. */
   additionalRows?: Array<[string, string, string, string]>;
+  /**
+   * Presenter fee rows. Printed as their own table so presenter and travel
+   * money is always visible as separate charges rather than being folded into
+   * the package price (§8).
+   * Columns: presenter, duration/videos, base, additional, travel, other, total.
+   */
+  presenterRows?: Array<[string, string, string, string, string, string, string]>;
+  /** Presenter performance + other charges, excluding travel. */
+  presenter_total?: number;
+  /** Presenter travel, shown on its own line in the summary. */
+  presenter_travel_total?: number;
   /** Scope / inclusions frozen on the document at issue time. */
   scope?: string[];
   /** Advance payment split printed under the totals. */
@@ -278,6 +289,28 @@ export async function downloadDocumentPdf(doc: PdfDoc): Promise<void> {
   let afterTable =
     (pdf as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? y;
 
+  // Presenter charges — always their own table, never merged into the package line.
+  if (doc.presenterRows && doc.presenterRows.length > 0) {
+    autoTable(pdf, {
+      startY: afterTable + 16,
+      margin: { left: MARGIN, right: MARGIN },
+      head: [["Presenter", "Duration / videos", "Base", "Additional", "Travel", "Other", "Total"]],
+      body: doc.presenterRows.map((r) => [...r]),
+      styles: { fontSize: 8.5, cellPadding: 5, textColor: 30, lineColor: 225, lineWidth: 0.5 },
+      headStyles: { fillColor: [244, 246, 250], textColor: 60, fontStyle: "bold" },
+      columnStyles: {
+        2: { halign: "right", cellWidth: 62 },
+        3: { halign: "right", cellWidth: 62 },
+        4: { halign: "right", cellWidth: 70 },
+        5: { halign: "right", cellWidth: 52 },
+        6: { halign: "right", cellWidth: 68 },
+      },
+    });
+    afterTable =
+      (pdf as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ??
+      afterTable;
+  }
+
   // Additional costs (approved extras added during the project)
   if (doc.additionalRows && doc.additionalRows.length > 0) {
     autoTable(pdf, {
@@ -302,8 +335,11 @@ export async function downloadDocumentPdf(doc: PdfDoc): Promise<void> {
 
 
   // Totals
-  const totals: Array<[string, string]> = [["Subtotal", formatMoney(doc.subtotal)]];
+  const totals: Array<[string, string]> = [["Package subtotal", formatMoney(doc.subtotal)]];
   if (doc.discount_total) totals.push(["Discount", `- ${formatMoney(doc.discount_total)}`]);
+  if (doc.presenter_total) totals.push(["Presenter charges", formatMoney(doc.presenter_total)]);
+  if (doc.presenter_travel_total)
+    totals.push(["Presenter travel", formatMoney(doc.presenter_travel_total)]);
   if (doc.tax_total) totals.push(["Tax", formatMoney(doc.tax_total)]);
   if (doc.additional_total) totals.push(["Additional costs", formatMoney(doc.additional_total)]);
   totals.push(["Total", formatMoney(doc.grand_total)]);

@@ -50,6 +50,10 @@ const STATUS_TONE: Record<string, keyof typeof TONE> = {
   advance_pending: "warning",
   advance_partially_paid: "info",
   advance_paid: "success",
+  // presenters
+  active: "success",
+  inactive: "neutral",
+  not_paid: "danger",
   // generic
   scheduled: "info",
   completed: "success",

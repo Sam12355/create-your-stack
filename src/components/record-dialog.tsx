@@ -35,6 +35,8 @@ export type FieldType =
   | "textarea"
   | "select"
   | "list"
+  /** Several values from a fixed set, stored as a text[] column. */
+  | "multi"
   | "switch";
 
 
@@ -85,12 +87,40 @@ export function FieldGrid({
   return (
     <div className="grid gap-4 sm:grid-cols-2">
       {fields.map((f) => (
-        <div key={f.name} className={cn("space-y-1.5", (f.full || f.type === "textarea" || f.type === "list") && "sm:col-span-2")}>
+        <div key={f.name} className={cn("space-y-1.5", (f.full || f.type === "textarea" || f.type === "list" || f.type === "multi") && "sm:col-span-2")}>
           <Label htmlFor={f.name} className="text-xs font-medium text-muted-foreground">
             {f.label}
             {f.required ? <span className="text-destructive"> *</span> : null}
           </Label>
-          {f.type === "list" ? (
+          {f.type === "multi" ? (
+            <div className="flex flex-wrap gap-1.5">
+              {(f.options ?? []).map((o) => {
+                const current = Array.isArray(values[f.name]) ? (values[f.name] as string[]) : [];
+                const on = current.includes(o.value);
+                return (
+                  <button
+                    key={o.value}
+                    type="button"
+                    aria-pressed={on}
+                    onClick={() =>
+                      onChange(
+                        f.name,
+                        on ? current.filter((v) => v !== o.value) : [...current, o.value],
+                      )
+                    }
+                    className={cn(
+                      "rounded-full border px-3 py-1 text-xs transition-colors",
+                      on
+                        ? "border-transparent bg-accent text-accent-foreground"
+                        : "border-border text-muted-foreground hover:bg-muted",
+                    )}
+                  >
+                    {o.label}
+                  </button>
+                );
+              })}
+            </div>
+          ) : f.type === "list" ? (
             <Textarea
               id={f.name}
               rows={4}

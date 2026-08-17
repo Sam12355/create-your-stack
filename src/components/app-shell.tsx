@@ -19,6 +19,7 @@ import {
   ListChecks,
   LogOut,
   UserCog,
+  Mic,
 } from "lucide-react";
 import { getSupabase } from "@/lib/supabase";
 import { useSession } from "@/hooks/use-session";
@@ -30,6 +31,7 @@ const NAV = [
   { to: "/leads", label: "Leads", icon: Users },
   { to: "/customers", label: "Customers", icon: Contact },
   { to: "/packages", label: "Packages", icon: Package },
+  { to: "/presenters", label: "Presenters", icon: Mic },
   { to: "/quotations", label: "Quotations", icon: FileText },
   { to: "/projects", label: "Projects", icon: FolderKanban },
   { to: "/tracker", label: "Workflow Tracker", icon: ListChecks },

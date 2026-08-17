@@ -35,8 +35,17 @@ import { useSession } from "@/hooks/use-session";
 
 import { PageHeader } from "@/components/app-shell";
 import { LineItems } from "@/components/line-items";
+import { PresenterLines } from "@/components/presenter-lines";
+import { presenterBreakdown, presenterDescription, type PresenterLine } from "@/lib/presenters";
 import { RecordDialog, type Field, type Values } from "@/components/record-dialog";
-import { EmptyState, ErrorNote, Loading, StatCard, StatusBadge, humanize } from "@/components/ui-bits";
+import {
+  EmptyState,
+  ErrorNote,
+  Loading,
+  StatCard,
+  StatusBadge,
+  humanize,
+} from "@/components/ui-bits";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -51,7 +60,10 @@ export const Route = createFileRoute("/_authenticated/quotations/$id")({
   head: () => ({
     meta: [
       { title: "Quotation — VYBE Business System" },
-      { name: "description", content: "Edit a quotation, record the advance and issue the final invoice." },
+      {
+        name: "description",
+        content: "Edit a quotation, record the advance and issue the final invoice.",
+      },
     ],
   }),
   component: QuotationDetail,
@@ -137,6 +149,11 @@ function QuotationDetail() {
   const exportPdf = async () => {
     try {
       const items = await selectAll<PdfLine>("quotation_items", { eq: { quotation_id: q.id } });
+      const presenterRows = await selectAll<PresenterLine>("quotation_presenters", {
+        eq: { quotation_id: q.id },
+        order: { column: "position", ascending: true },
+      });
+      const pb = presenterBreakdown(presenterRows);
       const party =
         q.customer_snapshot ??
         (customer
@@ -159,6 +176,19 @@ function QuotationDetail() {
         customer: party ?? undefined,
         items,
         scope,
+        presenterRows: presenterRows.map((r) => [
+          presenterDescription(r),
+          `${r.duration} ${r.duration_unit}${Number(r.videos) > 1 ? ` × ${r.videos} videos` : ""}`,
+          formatMoney(r.base_rate),
+          Number(r.additional_amount) > 0 ? formatMoney(r.additional_amount) : "—",
+          Number(r.travel_total) > 0
+            ? `${formatMoney(r.travel_total)}${r.travel_location ? ` — ${r.travel_location}` : ""}`
+            : "—",
+          Number(r.other_charges) > 0 ? formatMoney(r.other_charges) : "—",
+          formatMoney(r.total),
+        ]),
+        presenter_total: pb.performance_total + pb.other_total,
+        presenter_travel_total: pb.travel_total,
         advance: { percent: advancePercent, amount: advance.advance, balance: advance.balance },
         subtotal: q.subtotal,
         discount_total: q.discount_total,
@@ -193,7 +223,10 @@ function QuotationDetail() {
       name: "package_id",
       label: "Selected package",
       type: "select",
-      options: (packages.data ?? []).map((p) => ({ value: p.id, label: `${p.name} — ${p.category}` })),
+      options: (packages.data ?? []).map((p) => ({
+        value: p.id,
+        label: `${p.name} — ${p.category}`,
+      })),
     },
     { name: "title", label: "Quotation title", full: true },
     { name: "package_description", label: "Package description", type: "textarea" },
@@ -344,6 +377,9 @@ function QuotationDetail() {
     try {
       const existing = await findFinalInvoice(q.id);
       if (existing) {
+        toast.info(
+          `A final invoice has already been created for this quotation (${existing.number}).`,
+        );
         navigate({ to: "/invoices/$id", params: { id: existing.id } });
         return;
       }
@@ -355,10 +391,22 @@ function QuotationDetail() {
       }
       const created = await createFinalInvoiceFromQuotation(q);
       invalidate();
-      toast.success(`Final invoice ${created.number} created from ${q.number}.`);
+      // `existed` means another session won the race; the invoice was not duplicated.
+      if (created.existed) {
+        toast.info(
+          `A final invoice has already been created for this quotation (${created.number}).`,
+        );
+      } else {
+        toast.success(`Final invoice ${created.number} created from ${q.number}.`);
+      }
       navigate({ to: "/invoices/$id", params: { id: created.id } });
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not create the final invoice");
+      // Raw Postgres/PostgREST text (column names, schema-cache wording) is for
+      // the console, not for the person using the app.
+      console.error("[final invoice] creation failed for quotation", q.number, e);
+      toast.error(
+        "The final invoice could not be created. Please try again or contact the administrator.",
+      );
     } finally {
       setWorking(false);
     }
@@ -430,7 +478,11 @@ function QuotationDetail() {
               {q.invoice_id ? "View final invoice" : "Create final invoice"}
             </Button>
             {q.status === "draft" ? (
-              <Button variant="ghost" className="text-destructive" onClick={() => void deleteDraft()}>
+              <Button
+                variant="ghost"
+                className="text-destructive"
+                onClick={() => void deleteDraft()}
+              >
                 <Trash2 className="mr-1.5 h-4 w-4" /> Delete draft
               </Button>
             ) : null}
@@ -500,6 +552,17 @@ function QuotationDetail() {
         }}
       />
 
+      <PresenterLines
+        table="quotation_presenters"
+        parentKey="quotation_id"
+        parentId={q.id}
+        locked={!editable}
+        onChanged={async () => {
+          await recalcQuotation(q.id, advancePercent);
+          invalidate();
+        }}
+      />
+
       <Card className="mt-4">
         <CardHeader className="flex flex-row items-center justify-between pb-3">
           <CardTitle className="text-base">Advance payments</CardTitle>
@@ -559,16 +622,18 @@ function QuotationDetail() {
             ))
           )}
           <dl className="grid gap-1 border-t border-border pt-3 text-sm sm:grid-cols-2">
-            {[
-              ["Quotation total", formatMoney(q.grand_total)],
-              [`Required advance (${advancePercent}%)`, formatMoney(advance.advance)],
-              ["Advance received", formatMoney(advanceReceived)],
+            {(
               [
-                "Unpaid advance",
-                formatMoney(Math.max(0, advance.advance - advanceReceived)),
-              ],
-              ["Original remaining balance", formatMoney(advance.balance)],
-            ].map(([label, value]) => (
+                ["Quotation total", formatMoney(q.grand_total)],
+                ...(Number(q.presenter_total) > 0
+                  ? [["— including presenter charges", formatMoney(q.presenter_total)]]
+                  : []),
+                [`Required advance (${advancePercent}%)`, formatMoney(advance.advance)],
+                ["Advance received", formatMoney(advanceReceived)],
+                ["Unpaid advance", formatMoney(Math.max(0, advance.advance - advanceReceived))],
+                ["Original remaining balance", formatMoney(advance.balance)],
+              ] as Array<[string, string]>
+            ).map(([label, value]) => (
               <div key={label} className="flex justify-between gap-4">
                 <dt className="text-muted-foreground">{label}</dt>
                 <dd className="tabular">{value}</dd>

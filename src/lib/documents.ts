@@ -1,6 +1,66 @@
 import { insertRow, logActivity, nextNumber, selectAll, selectOne, updateRow } from "./api";
 import { getSupabase } from "./supabase";
 import { d, documentTotals, round, splitAdvance } from "./money";
+import { presentersTotal } from "./presenters";
+
+/** Columns copied verbatim when a presenter row moves between documents. */
+const PRESENTER_FIELDS = [
+  "presenter_id",
+  "presenter_snapshot",
+  "presenter_no",
+  "presenter_name",
+  "duration",
+  "duration_unit",
+  "tier_label",
+  "videos",
+  "base_rate",
+  "additional_duration",
+  "additional_rate",
+  "additional_amount",
+  "travel_required",
+  "travel_location",
+  "travel_charge",
+  "travel_visits",
+  "travel_notes",
+  "other_charges",
+  "other_charges_note",
+  "pricing_notes",
+  "performance_total",
+  "travel_total",
+  "total",
+  "position",
+] as const;
+
+function copyPresenterFields(row: Record<string, unknown>) {
+  const out: Record<string, unknown> = {};
+  for (const key of PRESENTER_FIELDS) out[key] = row[key] ?? null;
+  return out;
+}
+
+/**
+ * Presenter tables arrive with supabase/update-03-presenters.sql. Until that
+ * migration is run the tables are absent, and every existing quotation and
+ * invoice must keep recalculating exactly as it did before — so a missing
+ * table reads as "no presenters" rather than breaking the document. Any other
+ * database error is still thrown.
+ */
+async function safePresenterRows<T>(
+  table: "quotation_presenters" | "invoice_presenters",
+  opts: Parameters<typeof selectAll>[1],
+): Promise<T[]> {
+  try {
+    return await selectAll<T>(table, opts);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    if (/does not exist|schema cache|relation/i.test(message)) return [];
+    throw e;
+  }
+}
+
+const presenterTotalsOf = (
+  table: "quotation_presenters" | "invoice_presenters",
+  eq: Record<string, unknown>,
+) => safePresenterRows<{ total: number }>(table, { eq, select: "total" });
 
 /* ------------------------------------------------------------------ types */
 
@@ -55,6 +115,8 @@ export type Quotation = {
   subtotal: number;
   discount_total: number;
   tax_total: number;
+  /** Presenter + travel charges. Sits outside `subtotal` so it is never discounted. */
+  presenter_total: number;
   grand_total: number;
   notes: string | null;
   locked: boolean;
@@ -69,6 +131,13 @@ export type Invoice = {
   customer_id: string;
   project_id: string | null;
   quotation_id: string | null;
+  /**
+   * Relationship + reporting link to the catalogue package. The historical
+   * record is `package_snapshot`; this id may point at a package whose price
+   * has since changed, so never recompute money from it.
+   * Added by supabase/update-04-invoice-package-link.sql.
+   */
+  package_id: string | null;
   status: string;
   doc_kind: string;
   issue_date: string;
@@ -76,6 +145,8 @@ export type Invoice = {
   subtotal: number;
   discount_total: number;
   tax_total: number;
+  /** Presenter + travel charges copied from the quotation and editable in draft. */
+  presenter_total: number;
   grand_total: number;
   additional_total: number;
   adjustment_total: number;
@@ -215,26 +286,43 @@ export async function customerSnapshot(customerId: string): Promise<CustomerSnap
 
 /* ---------------------------------------------------------- calculations */
 
-/** Recalculate a quotation from its line items, including the advance split. */
+/**
+ * Recalculate a quotation from its line items and presenter rows, including
+ * the advance split.
+ *
+ * Presenter money is added AFTER `documentTotals`, never inside `subtotal`.
+ * That is what keeps the introductory discount away from presenter charges
+ * (§7): the discount is only ever computed from package line items, so a
+ * charge that never enters that subtotal cannot be discounted by accident.
+ * The 50% advance, by contrast, is taken from the full total including
+ * presenters and travel (§8).
+ */
 export async function recalcQuotation(quotationId: string, advancePercentInput?: number) {
-  const items = await selectAll<LineRow>("quotation_items", {
-    eq: { quotation_id: quotationId },
-  });
-  const current = await selectOne<{ advance_percent: number }>(
-    "quotations",
-    quotationId,
-    "advance_percent",
-  );
+  const [items, current, presenters] = await Promise.all([
+    selectAll<LineRow>("quotation_items", { eq: { quotation_id: quotationId } }),
+    selectOne<{ advance_percent: number }>("quotations", quotationId, "advance_percent"),
+    presenterTotalsOf("quotation_presenters", { quotation_id: quotationId }),
+  ]);
   const percent = advancePercentInput ?? Number(current?.advance_percent ?? 50);
   const totals = documentTotals(items);
-  const split = splitAdvance(totals.grand_total, percent);
+  const presenterTotal = presentersTotal(presenters);
+  const grand = round(d(totals.grand_total).plus(d(presenterTotal))).toNumber();
+  const split = splitAdvance(grand, percent);
   await updateRow("quotations", quotationId, {
     ...totals,
+    presenter_total: presenterTotal,
+    grand_total: grand,
     advance_percent: percent,
     advance_amount: split.advance,
     balance_amount: split.balance,
   });
-  return { ...totals, advance_percent: percent, ...split };
+  return {
+    ...totals,
+    presenter_total: presenterTotal,
+    grand_total: grand,
+    advance_percent: percent,
+    ...split,
+  };
 }
 
 /**
@@ -243,7 +331,7 @@ export async function recalcQuotation(quotationId: string, advancePercentInput?:
  * Balance due deducts every payment already received (advance included).
  */
 export async function recalcInvoice(invoiceId: string) {
-  const [items, extras, inv] = await Promise.all([
+  const [items, extras, inv, presenters] = await Promise.all([
     selectAll<LineRow>("invoice_items", { eq: { invoice_id: invoiceId } }),
     selectAll<AdditionalCost>("invoice_additional_costs", { eq: { invoice_id: invoiceId } }),
     selectOne<{ adjustment_total: number; paid_total: number }>(
@@ -251,6 +339,7 @@ export async function recalcInvoice(invoiceId: string) {
       invoiceId,
       "adjustment_total, paid_total",
     ),
+    presenterTotalsOf("invoice_presenters", { invoice_id: invoiceId }),
   ]);
 
   const totals = documentTotals(items);
@@ -258,7 +347,10 @@ export async function recalcInvoice(invoiceId: string) {
     .filter((e) => e.approval_status === "approved")
     .reduce((sum, e) => sum.plus(d(e.amount)), d(0));
   const adjustment = d(inv?.adjustment_total ?? 0);
-  const grand = round(d(totals.grand_total).plus(approved).minus(adjustment)).toNumber();
+  const presenterTotal = presentersTotal(presenters);
+  const grand = round(
+    d(totals.grand_total).plus(approved).plus(d(presenterTotal)).minus(adjustment),
+  ).toNumber();
 
   const payments = await selectAll<{ amount: number }>("payments", {
     eq: { invoice_id: invoiceId },
@@ -269,6 +361,7 @@ export async function recalcInvoice(invoiceId: string) {
   await updateRow("invoices", invoiceId, {
     ...totals,
     additional_total: round(approved).toNumber(),
+    presenter_total: presenterTotal,
     grand_total: grand,
     paid_total: paid,
     balance: round(d(grand).minus(d(paid))).toNumber(),
@@ -278,6 +371,7 @@ export async function recalcInvoice(invoiceId: string) {
     ...totals,
     additional_total: round(approved).toNumber(),
     adjustment_total: round(adjustment).toNumber(),
+    presenter_total: presenterTotal,
     grand_total: grand,
     paid_total: paid,
     balance: round(d(grand).minus(d(paid))).toNumber(),
@@ -363,6 +457,20 @@ async function copyQuotationItems(fromId: string, toId: string) {
   }
 }
 
+/** Carry the agreed presenter terms across to a copied / revised quotation. */
+async function copyQuotationPresenters(fromId: string, toId: string) {
+  const rows = await safePresenterRows<Record<string, unknown>>("quotation_presenters", {
+    eq: { quotation_id: fromId },
+    order: { column: "position", ascending: true },
+  });
+  for (const r of rows) {
+    await insertRow("quotation_presenters", {
+      quotation_id: toId,
+      ...copyPresenterFields(r),
+    });
+  }
+}
+
 /**
  * Copy a quotation into a new draft. `revision` keeps the original as the
  * parent and marks it Revised so the accepted record is never overwritten.
@@ -397,12 +505,11 @@ export async function copyQuotation(
     balance_amount: source.balance_amount,
     locked: false,
     version: 1,
-    ...(opts.revision
-      ? { revision_of: source.id, amendment_reason: opts.reason ?? null }
-      : {}),
+    ...(opts.revision ? { revision_of: source.id, amendment_reason: opts.reason ?? null } : {}),
   });
 
   await copyQuotationItems(source.id, created.id);
+  await copyQuotationPresenters(source.id, created.id);
   await recalcQuotation(created.id, Number(source.advance_percent ?? 50));
 
   if (opts.revision) {
@@ -416,13 +523,18 @@ export async function copyQuotation(
 
 /* ------------------------------------------------- quotation → invoice */
 
+/**
+ * The live final invoice for a quotation, if there is one. Voided and
+ * superseded (revised) invoices are ignored so a controlled revision chain
+ * still allows a current invoice to be found.
+ */
 export async function findFinalInvoice(quotationId: string) {
   const rows = await selectAll<{ id: string; number: string; status: string }>("invoices", {
     eq: { quotation_id: quotationId },
     select: "id, number, status",
     order: { column: "created_at", ascending: false },
   });
-  return rows.find((r) => r.status !== "void") ?? null;
+  return rows.find((r) => r.status !== "void" && r.status !== "revised") ?? null;
 }
 
 /**
@@ -439,11 +551,22 @@ export async function createFinalInvoiceFromQuotation(quotation: Quotation) {
   const sb = getSupabase();
   const snapshot = quotation.customer_snapshot ?? (await customerSnapshot(quotation.customer_id));
   const settings = (
-    await selectAll<{ bank_details: string | null; invoice_terms: string | null; payment_instructions: string | null }>(
-      "settings",
-      { select: "bank_details, invoice_terms, payment_instructions", limit: 1 },
-    )
+    await selectAll<{
+      bank_details: string | null;
+      invoice_terms: string | null;
+      payment_instructions: string | null;
+    }>("settings", { select: "bank_details, invoice_terms, payment_instructions", limit: 1 })
   )[0];
+
+  // Advance already banked against the quotation, carried onto the invoice so
+  // the balance is right before any recalculation runs.
+  const advancePayments = await selectAll<{ amount: number }>("payments", {
+    eq: { quotation_id: quotation.id },
+    select: "amount",
+  });
+  const advanceReceived = round(
+    advancePayments.reduce((s, p) => s.plus(d(p.amount)), d(0)),
+  ).toNumber();
 
   const number = await nextNumber("invoice");
   const invoice = await insertRow<{ id: string }>("invoices", {
@@ -479,38 +602,81 @@ export async function createFinalInvoiceFromQuotation(quotation: Quotation) {
     grand_total: quotation.grand_total,
     quotation_total: quotation.grand_total,
     advance_expected: quotation.advance_amount,
+    advance_received: advanceReceived,
     balance: quotation.grand_total,
   });
 
-  const items = await selectAll<Record<string, unknown>>("quotation_items", {
-    eq: { quotation_id: quotation.id },
-    order: { column: "position", ascending: true },
-  });
-  for (const it of items) {
-    await insertRow("invoice_items", {
-      invoice_id: invoice.id,
-      package_id: it["package_id"] ?? null,
-      package_snapshot: it["package_snapshot"] ?? null,
-      description: it["description"],
-      quantity: it["quantity"],
-      unit_price: it["unit_price"],
-      discount: it["discount"],
-      tax_rate: it["tax_rate"],
-      line_total: it["line_total"],
-      position: it["position"],
+  /**
+   * Everything after the invoice row itself is undone if any step fails, so a
+   * failure can never leave a half-built invoice behind.
+   *
+   * Payments are detached FIRST and deleted never: payments.invoice_id is
+   * ON DELETE CASCADE, so dropping the invoice while advances are still
+   * attached would destroy real payment records. Detaching returns them to the
+   * quotation, exactly where they were before this ran.
+   */
+  const rollback = async () => {
+    try {
+      await sb.from("payments").update({ invoice_id: null }).eq("invoice_id", invoice.id);
+      await sb.from("invoices").delete().eq("id", invoice.id);
+    } catch {
+      // Surface the original failure rather than a cleanup failure.
+    }
+  };
+
+  try {
+    const items = await selectAll<Record<string, unknown>>("quotation_items", {
+      eq: { quotation_id: quotation.id },
+      order: { column: "position", ascending: true },
     });
+    for (const it of items) {
+      await insertRow("invoice_items", {
+        invoice_id: invoice.id,
+        package_id: it["package_id"] ?? null,
+        package_snapshot: it["package_snapshot"] ?? null,
+        description: it["description"],
+        quantity: it["quantity"],
+        unit_price: it["unit_price"],
+        discount: it["discount"],
+        tax_rate: it["tax_rate"],
+        line_total: it["line_total"],
+        position: it["position"],
+      });
+    }
+
+    // Copy the approved presenter terms across. `quoted_total` freezes what the
+    // quotation agreed so a later invoice edit shows as an adjustment rather
+    // than silently rewriting history — the figures are copied verbatim, never
+    // recomputed from the presenter's current profile price.
+    const presenterRows = await safePresenterRows<Record<string, unknown>>("quotation_presenters", {
+      eq: { quotation_id: quotation.id },
+      order: { column: "position", ascending: true },
+    });
+    for (const r of presenterRows) {
+      await insertRow("invoice_presenters", {
+        invoice_id: invoice.id,
+        source_quotation_presenter_id: r["id"],
+        quoted_total: r["total"] ?? 0,
+        ...copyPresenterFields(r),
+      });
+    }
+
+    // Attach advance payments already recorded against the quotation. Done last
+    // so that a rollback before this point cannot touch payment rows at all.
+    const { error: payErr } = await sb
+      .from("payments")
+      .update({ invoice_id: invoice.id })
+      .eq("quotation_id", quotation.id)
+      .is("invoice_id", null);
+    if (payErr) throw new Error(payErr.message);
+
+    await updateRow("quotations", quotation.id, { invoice_id: invoice.id });
+    await recalcInvoice(invoice.id);
+  } catch (e) {
+    await rollback();
+    throw e;
   }
 
-  // Attach advance payments already recorded against the quotation.
-  const { error: payErr } = await sb
-    .from("payments")
-    .update({ invoice_id: invoice.id })
-    .eq("quotation_id", quotation.id)
-    .is("invoice_id", null);
-  if (payErr) throw new Error(payErr.message);
-
-  await updateRow("quotations", quotation.id, { invoice_id: invoice.id });
-  await recalcInvoice(invoice.id);
   await logActivity("quotation", quotation.id, "final invoice created", {
     invoice_id: invoice.id,
     number,
@@ -520,71 +686,111 @@ export async function createFinalInvoiceFromQuotation(quotation: Quotation) {
 
 /** Copy an issued invoice into a new editable draft, keeping the original. */
 export async function reviseInvoice(inv: Invoice, reason?: string | null) {
+  const sb = getSupabase();
   const number = await nextNumber("invoice");
-  const created = await insertRow<{ id: string }>("invoices", {
-    number,
-    customer_id: inv.customer_id,
-    project_id: inv.project_id,
-    quotation_id: inv.quotation_id,
-    doc_kind: inv.doc_kind,
-    status: "draft",
-    issue_date: new Date().toISOString().slice(0, 10),
-    due_date: inv.due_date,
-    milestone_label: inv.milestone_label,
-    quotation_snapshot: inv.quotation_snapshot,
-    package_snapshot: inv.package_snapshot,
-    customer_snapshot: inv.customer_snapshot,
-    package_description: inv.package_description,
-    inclusions: inv.inclusions ?? [],
-    notes: inv.notes,
-    bank_details: inv.bank_details,
-    terms_text: inv.terms_text,
-    payment_instructions: inv.payment_instructions,
-    quotation_total: inv.quotation_total,
-    adjustment_total: inv.adjustment_total,
-    adjustment_note: inv.adjustment_note,
-    advance_expected: inv.advance_expected,
-    revision_of: inv.id,
-    version: Number(inv.version ?? 1) + 1,
-    amendment_reason: reason ?? null,
-  });
 
-  const items = await selectAll<Record<string, unknown>>("invoice_items", {
-    eq: { invoice_id: inv.id },
-    order: { column: "position", ascending: true },
-  });
-  for (const it of items) {
-    await insertRow("invoice_items", {
-      invoice_id: created.id,
-      package_id: it["package_id"] ?? null,
-      description: it["description"],
-      quantity: it["quantity"],
-      unit_price: it["unit_price"],
-      discount: it["discount"],
-      tax_rate: it["tax_rate"],
-      line_total: it["line_total"],
-      position: it["position"],
-    });
-  }
-  const extras = await selectAll<AdditionalCost>("invoice_additional_costs", {
-    eq: { invoice_id: inv.id },
-  });
-  for (const c of extras) {
-    await insertRow("invoice_additional_costs", {
-      invoice_id: created.id,
-      description: c.description,
-      cost_type: c.cost_type,
-      quantity: c.quantity,
-      unit_price: c.unit_price,
-      amount: c.amount,
-      reason: c.reason,
-      notes: c.notes,
-      approval_status: c.approval_status,
-    });
-  }
-
+  // Supersede the original BEFORE inserting its replacement. The database
+  // permits only one active final invoice per quotation, so the old row must
+  // step out of that index first; it is put back if the insert fails.
+  const previousStatus = inv.status;
   await updateRow("invoices", inv.id, { status: "revised" });
-  await recalcInvoice(created.id);
+
+  let created: { id: string };
+  try {
+    created = await insertRow<{ id: string }>("invoices", {
+      number,
+      customer_id: inv.customer_id,
+      project_id: inv.project_id,
+      quotation_id: inv.quotation_id,
+      package_id: inv.package_id,
+      doc_kind: inv.doc_kind,
+      status: "draft",
+      issue_date: new Date().toISOString().slice(0, 10),
+      due_date: inv.due_date,
+      milestone_label: inv.milestone_label,
+      quotation_snapshot: inv.quotation_snapshot,
+      package_snapshot: inv.package_snapshot,
+      customer_snapshot: inv.customer_snapshot,
+      package_description: inv.package_description,
+      inclusions: inv.inclusions ?? [],
+      notes: inv.notes,
+      bank_details: inv.bank_details,
+      terms_text: inv.terms_text,
+      payment_instructions: inv.payment_instructions,
+      quotation_total: inv.quotation_total,
+      adjustment_total: inv.adjustment_total,
+      adjustment_note: inv.adjustment_note,
+      advance_expected: inv.advance_expected,
+      revision_of: inv.id,
+      version: Number(inv.version ?? 1) + 1,
+      amendment_reason: reason ?? null,
+    });
+  } catch (e) {
+    await updateRow("invoices", inv.id, { status: previousStatus });
+    throw e;
+  }
+
+  try {
+    const items = await selectAll<Record<string, unknown>>("invoice_items", {
+      eq: { invoice_id: inv.id },
+      order: { column: "position", ascending: true },
+    });
+    for (const it of items) {
+      await insertRow("invoice_items", {
+        invoice_id: created.id,
+        package_id: it["package_id"] ?? null,
+        package_snapshot: it["package_snapshot"] ?? null,
+        description: it["description"],
+        quantity: it["quantity"],
+        unit_price: it["unit_price"],
+        discount: it["discount"],
+        tax_rate: it["tax_rate"],
+        line_total: it["line_total"],
+        position: it["position"],
+      });
+    }
+    const extras = await selectAll<AdditionalCost>("invoice_additional_costs", {
+      eq: { invoice_id: inv.id },
+    });
+    for (const c of extras) {
+      await insertRow("invoice_additional_costs", {
+        invoice_id: created.id,
+        description: c.description,
+        cost_type: c.cost_type,
+        quantity: c.quantity,
+        unit_price: c.unit_price,
+        amount: c.amount,
+        reason: c.reason,
+        notes: c.notes,
+        approval_status: c.approval_status,
+      });
+    }
+    const presenterRows = await safePresenterRows<Record<string, unknown>>("invoice_presenters", {
+      eq: { invoice_id: inv.id },
+      order: { column: "position", ascending: true },
+    });
+    for (const r of presenterRows) {
+      await insertRow("invoice_presenters", {
+        invoice_id: created.id,
+        source_quotation_presenter_id: r["source_quotation_presenter_id"] ?? null,
+        quoted_total: r["quoted_total"] ?? 0,
+        adjustment_reason: r["adjustment_reason"] ?? null,
+        ...copyPresenterFields(r),
+      });
+    }
+    await recalcInvoice(created.id);
+  } catch (e) {
+    // Undo both halves: drop the partial replacement, restore the original.
+    try {
+      await sb.from("payments").update({ invoice_id: null }).eq("invoice_id", created.id);
+      await sb.from("invoices").delete().eq("id", created.id);
+      await updateRow("invoices", inv.id, { status: previousStatus });
+    } catch {
+      // Surface the original failure rather than a cleanup failure.
+    }
+    throw e;
+  }
+
   await logActivity("invoice", inv.id, "revised", { revision_id: created.id, number });
   return { id: created.id, number };
 }

@@ -3,7 +3,15 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, FileDown, Pencil, Printer, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { deleteRow, insertRow, logActivity, selectAll, updateRow, useList, useOne } from "@/lib/api";
+import {
+  deleteRow,
+  insertRow,
+  logActivity,
+  selectAll,
+  updateRow,
+  useList,
+  useOne,
+} from "@/lib/api";
 import { formatDate, formatMoney } from "@/lib/money";
 import { downloadDocumentPdf, type PdfLine } from "@/lib/pdf";
 import {
@@ -22,6 +30,8 @@ import {
 import { useSession } from "@/hooks/use-session";
 import { PageHeader } from "@/components/app-shell";
 import { LineItems } from "@/components/line-items";
+import { PresenterLines } from "@/components/presenter-lines";
+import { presenterBreakdown, presenterDescription, type PresenterLine } from "@/lib/presenters";
 import { RecordDialog, type Field, type Values } from "@/components/record-dialog";
 import {
   EmptyState,
@@ -124,6 +134,11 @@ function InvoiceDetail() {
   const exportPdf = async () => {
     try {
       const items = await selectAll<PdfLine>("invoice_items", { eq: { invoice_id: inv.id } });
+      const presenterRows = await selectAll<PresenterLine>("invoice_presenters", {
+        eq: { invoice_id: inv.id },
+        order: { column: "position", ascending: true },
+      });
+      const pb = presenterBreakdown(presenterRows);
       const party =
         inv.customer_snapshot ??
         (customer
@@ -149,6 +164,19 @@ function InvoiceDetail() {
         customer: party ?? undefined,
         items,
         scope,
+        presenterRows: presenterRows.map((r) => [
+          presenterDescription(r),
+          `${r.duration} ${r.duration_unit}${Number(r.videos) > 1 ? ` × ${r.videos} videos` : ""}`,
+          formatMoney(r.base_rate),
+          Number(r.additional_amount) > 0 ? formatMoney(r.additional_amount) : "—",
+          Number(r.travel_total) > 0
+            ? `${formatMoney(r.travel_total)}${r.travel_location ? ` — ${r.travel_location}` : ""}`
+            : "—",
+          Number(r.other_charges) > 0 ? formatMoney(r.other_charges) : "—",
+          formatMoney(r.total),
+        ]),
+        presenter_total: pb.performance_total + pb.other_total,
+        presenter_travel_total: pb.travel_total,
         additionalRows: approvedCosts.map((c) => [
           `${humanize(c.cost_type)} — ${c.description}`,
           String(c.quantity),
@@ -409,6 +437,17 @@ function InvoiceDetail() {
         }}
       />
 
+      <PresenterLines
+        table="invoice_presenters"
+        parentKey="invoice_id"
+        parentId={inv.id}
+        locked={!editable}
+        showAdjustment
+        onChanged={async () => {
+          await invalidate();
+        }}
+      />
+
       <Card className="mt-4">
         <CardHeader className="flex flex-row items-center justify-between pb-3">
           <CardTitle className="text-base">Additional costs</CardTitle>
@@ -485,7 +524,10 @@ function InvoiceDetail() {
         </CardHeader>
         <CardContent className="space-y-2">
           {(payments.data ?? []).length === 0 ? (
-            <EmptyState title="No payments yet" description="Record the advance and the balance here." />
+            <EmptyState
+              title="No payments yet"
+              description="Record the advance and the balance here."
+            />
           ) : (
             (payments.data ?? []).map((p) => (
               <div
@@ -524,14 +566,19 @@ function InvoiceDetail() {
           )}
 
           <dl className="grid gap-1 border-t border-border pt-3 text-sm sm:grid-cols-2">
-            {[
-              ["Quotation total", formatMoney(inv.quotation_total || inv.subtotal)],
-              ["Approved additional costs", formatMoney(inv.additional_total)],
-              ["Adjustment / discount", `- ${formatMoney(inv.adjustment_total)}`],
-              ["Invoice total", formatMoney(inv.grand_total)],
-              ["Total paid (incl. advance)", `- ${formatMoney(inv.paid_total)}`],
-              ["Balance due", formatMoney(inv.balance)],
-            ].map(([label, value]) => (
+            {(
+              [
+                ["Quotation total", formatMoney(inv.quotation_total || inv.subtotal)],
+                ...(Number(inv.presenter_total) > 0
+                  ? [["Presenter & travel charges", formatMoney(inv.presenter_total)]]
+                  : []),
+                ["Approved additional costs", formatMoney(inv.additional_total)],
+                ["Adjustment / discount", `- ${formatMoney(inv.adjustment_total)}`],
+                ["Invoice total", formatMoney(inv.grand_total)],
+                ["Total paid (incl. advance)", `- ${formatMoney(inv.paid_total)}`],
+                ["Balance due", formatMoney(inv.balance)],
+              ] as Array<[string, string]>
+            ).map(([label, value]) => (
               <div key={label} className="flex justify-between gap-4">
                 <dt className="text-muted-foreground">{label}</dt>
                 <dd className="tabular">{value}</dd>
